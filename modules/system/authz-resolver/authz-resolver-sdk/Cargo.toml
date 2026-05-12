@@ -28,10 +28,12 @@ schemars = { workspace = true }
 # GTS types
 gts = { workspace = true }
 gts-macros = { workspace = true }
+modkit-gts = { workspace = true }
 
 # ModKit dependencies
 modkit = { workspace = true }
 modkit-security = { workspace = true }
+tenant-resolver-sdk = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

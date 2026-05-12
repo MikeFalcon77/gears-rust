@@ -56,7 +56,7 @@ In Cyber Ware's architecture:
 - **Resource Owner Subject** - Optional subject bound to a resource instance for per-subject scoping (e.g., "my tasks"). Relationship semantics are domain-specific (creator, assignee, etc.) and do not imply administrative control.
 - **Resource** - Object being accessed. Every resource belongs to a tenant and may optionally have a subject owner. Identified by type (GTS ID) and instance ID.
 - **Resource Group** - Optional container for resources, used for access control. See [RESOURCE_GROUP_MODEL.md](./RESOURCE_GROUP_MODEL.md).
-- **Permission** - `{ resource_type, action }` - allowed operation identifier.
+- **Permission** - `{ resource_type, action }` - allowed operation identifier. Canonical base GTS type: `gts.cf.modkit.authz.permission.v1~`. See [PERMISSION_GTS_TYPE.md](./PERMISSION_GTS_TYPE.md) for the full schema, instance naming convention, and scenario examples.
 - **Access Constraints** - Structured predicates returned by the PDP for query-time enforcement. NOT policies (stored vendor-side) or "grants" (OAuth flows, Zanzibar tuples), but compiled, time-bound enforcement artifacts computed at evaluation time.
 - **Security Context** - Result of successful authentication containing subject identity, tenant information, and optionally the original bearer token. Flows from authentication to authorization. Required fields: `subject_id`, `subject_tenant_id`, `token_scopes`. Optional fields: `subject_type`, `bearer_token`.
 - **Token Scopes** - Capability restrictions extracted from the access token. Act as a "ceiling" on what an application can do, regardless of user's actual permissions. See [Token Scopes](#token-scopes).
@@ -1069,7 +1069,7 @@ The Rust SQL compilation library supports **extensible predicate types**:
 |------|-------------|-----------------|-----------------|
 | `eq` | Property equals value | `resource_property`, `value` | — |
 | `in` | Property in value list | `resource_property`, `values` | — |
-| `in_tenant_subtree` | Tenant subtree via closure table | `resource_property`, `root_tenant_id` | `barrier_mode`, `tenant_status` |
+| `in_tenant_subtree` | Tenant subtree via closure table | `resource_property`, `root_tenant_id` | `barrier_mode`, `descendant_status` |
 | `in_group` | Flat group membership | `resource_property`, `group_ids` | — |
 | `in_group_subtree` | Group subtree via closure table | `resource_property`, `root_group_id` | — |
 
@@ -1113,7 +1113,7 @@ Filters resources by tenant subtree using the closure table. The `resource_prope
 - `resource_property` (required): Property containing tenant ID (e.g., `owner_tenant_id`)
 - `root_tenant_id` (required): Root of tenant subtree
 - `barrier_mode` (optional): Barrier handling mode, default `"all"`. Values: `"all"` (respect all barriers), `"none"` (ignore barriers)
-- `tenant_status` (optional): Filter by tenant status
+- `descendant_status` (optional): Filter by tenant status — applies to descendants reached via the closure (the column name mirrors `tenant_closure.descendant_status` so the binding is unambiguous; the root ancestor itself is not filtered)
 
 ```jsonc
 {
@@ -1121,7 +1121,7 @@ Filters resources by tenant subtree using the closure table. The `resource_prope
   "resource_property": "owner_tenant_id",
   "root_tenant_id": "tenantA-uuid",
   "barrier_mode": "all",  // default: "all"
-  "tenant_status": ["active", "suspended"]
+  "descendant_status": ["active", "suspended"]
 }
 // SQL: owner_tenant_id IN (
 //   SELECT descendant_id FROM tenant_closure
@@ -1141,7 +1141,7 @@ Filters resources by tenant subtree using the closure table. The `resource_prope
 
 **Future extensibility:** The `barrier` column is SMALLINT to allow future use as a bitmask for multiple barrier types (16 bits of headroom; portable across PostgreSQL and MySQL). Future modes (e.g., `"data_sovereignty_only"`) can be added with selective checks like `(barrier & mask) = 0` without breaking existing consumers.
 
-**Relationship to request `tenant_context`:** The PDP uses `context.tenant_context` from the request to determine the tenant context, then generates `in_tenant_subtree` predicates in the response. The predicate's `root_tenant_id` comes from either the request's `tenant_context.root_id` or PDP's resolution from token/subject. The `barrier_mode` and `tenant_status` parameters flow through from request to predicate.
+**Relationship to request `tenant_context`:** The PDP uses `context.tenant_context` from the request to determine the tenant context, then generates `in_tenant_subtree` predicates in the response. The predicate's `root_tenant_id` comes from either the request's `tenant_context.root_id` or PDP's resolution from token/subject. The request-side `barrier_mode` flows through to the predicate unchanged; the request-side `tenant_status` (caller intent: "only tenants with these statuses") is emitted on the predicate as `descendant_status` to match the SQL column it binds to in `tenant_closure`.
 
 #### 4. Group Membership Predicate (`type: "in_group"`)
 
@@ -1495,4 +1495,5 @@ These questions require further design work.
 - [TENANT_MODEL.md](./TENANT_MODEL.md) — Tenant topology, barriers, closure tables
 - [RESOURCE_GROUP_MODEL.md](./RESOURCE_GROUP_MODEL.md) — Resource group topology, membership, hierarchy
 - [AUTHZ_USAGE_SCENARIOS.md](./AUTHZ_USAGE_SCENARIOS.md) — Authorization usage scenarios
+- [PERMISSION_GTS_TYPE.md](./PERMISSION_GTS_TYPE.md) — Canonical permission GTS type (`gts.cf.modkit.authz.permission.v1~`), schema, instance naming, scenarios
 - [Cyber Ware GTS (Global Type System)](../../../modules/system/types-registry/)
