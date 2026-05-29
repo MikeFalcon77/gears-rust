@@ -8,6 +8,7 @@ description = "Account Management SDK — public inter-module contracts (Account
 repository.workspace = true
 keywords = ["cyberfabric", "cyberware", "cyberfabric-system"]
 categories = ["web-programming"]
+metadata.docs.rs.all-features = true
 
 [lib]
 name = "account_management_sdk"

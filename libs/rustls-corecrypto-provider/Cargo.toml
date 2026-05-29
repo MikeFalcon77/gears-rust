@@ -10,6 +10,7 @@ description = "rustls CryptoProvider routing TLS crypto through Apple's FIPS 140
 readme = "README.md"
 keywords = ["rustls", "crypto", "tls", "fips", "macos"]
 categories = ["cryptography"]
+metadata.docs.rs.all-features = true
 
 [lib]
 name = "rustls_corecrypto_provider"

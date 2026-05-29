@@ -8,6 +8,7 @@ description = "Account Management module — tenant hierarchy storage floor"
 repository.workspace = true
 keywords = ["cyberfabric", "cyberware", "cyberfabric-system"]
 categories = ["web-programming"]
+metadata.docs.rs.all-features = true
 
 [lib]
 name = "account_management"

@@ -10,6 +10,7 @@ rust-version.workspace = true
 readme = "README.md"
 keywords = ["cyberfabric", "cyberware", "cyberfabric-system"]
 categories = ["web-programming"]
+metadata.docs.rs.all-features = true
 
 [lib]
 name = "oagw"

@@ -9,6 +9,7 @@ rust-version.workspace = true
 description = "ModKit canonical errors proc-macro"
 keywords = ["cyberfabric", "cyberware", "cyberware-modkit"]
 categories = ["development-tools::procedural-macro-helpers"]
+metadata.docs.rs.all-features = true
 
 [lib]
 proc-macro = true

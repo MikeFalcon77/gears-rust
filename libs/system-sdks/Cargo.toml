@@ -10,6 +10,7 @@ readme = "README.md"
 rust-version.workspace = true
 keywords = ["cyberfabric", "cyberware", "cyberware-system"]
 categories = ["development-tools"]
+metadata.docs.rs.all-features = true
 
 [lib]
 name = "cf_system_sdks"
