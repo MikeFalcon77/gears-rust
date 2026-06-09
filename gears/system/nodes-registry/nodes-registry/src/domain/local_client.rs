@@ -1,6 +1,7 @@
 use crate::domain::service::Service;
-use nodes_registry_sdk::{Node, NodeSysCap, NodeSysInfo, NodesRegistryClient, NodesRegistryError};
+use nodes_registry_sdk::{Node, NodeSysCap, NodeSysInfo, NodesRegistryClient};
 use std::sync::Arc;
+use toolkit_canonical_errors::CanonicalError;
 use toolkit_macros::domain_model;
 
 /// Local client implementation for the nodes registry
@@ -18,24 +19,23 @@ impl NodesRegistryLocalClient {
 
 #[async_trait::async_trait]
 impl NodesRegistryClient for NodesRegistryLocalClient {
-    async fn get_node(&self, id: uuid::Uuid) -> Result<Node, NodesRegistryError> {
-        self.service.get_node(id).map_err(Into::into)
+    async fn get_node(&self, id: uuid::Uuid) -> Result<Node, CanonicalError> {
+        self.service.get_node(id).map_err(CanonicalError::from)
     }
 
-    async fn list_nodes(&self) -> Result<Vec<Node>, NodesRegistryError> {
+    async fn list_nodes(&self) -> Result<Vec<Node>, CanonicalError> {
         Ok(self.service.list_nodes())
     }
 
-    async fn get_node_sysinfo(
-        &self,
-        node_id: uuid::Uuid,
-    ) -> Result<NodeSysInfo, NodesRegistryError> {
-        self.service.get_node_sysinfo(node_id).map_err(Into::into)
+    async fn get_node_sysinfo(&self, node_id: uuid::Uuid) -> Result<NodeSysInfo, CanonicalError> {
+        self.service
+            .get_node_sysinfo(node_id)
+            .map_err(CanonicalError::from)
     }
 
-    async fn get_node_syscap(&self, node_id: uuid::Uuid) -> Result<NodeSysCap, NodesRegistryError> {
+    async fn get_node_syscap(&self, node_id: uuid::Uuid) -> Result<NodeSysCap, CanonicalError> {
         self.service
             .get_node_syscap(node_id, false)
-            .map_err(Into::into)
+            .map_err(CanonicalError::from)
     }
 }

@@ -23,4 +23,8 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 
+toolkit-canonical-errors = { workspace = true }
 toolkit-node-info = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

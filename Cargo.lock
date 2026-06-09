@@ -1759,7 +1759,9 @@ name = "cf-gears-nodes-registry-sdk"
 version = "0.1.21"
 dependencies = [
  "async-trait",
+ "cf-gears-toolkit-canonical-errors",
  "cf-gears-toolkit-node-info",
+ "serde_json",
  "thiserror 2.0.18",
  "uuid",
 ]

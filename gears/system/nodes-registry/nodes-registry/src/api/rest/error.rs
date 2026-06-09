@@ -39,7 +39,11 @@ impl From<DomainError> for CanonicalError {
                 CanonicalError::internal(msg).create()
             }
             DomainError::InvalidInput(msg) => NodeError::invalid_argument()
-                .with_field_violation("input", msg, "VALIDATION_ERROR")
+                .with_field_violation(
+                    nodes_registry_sdk::field::INPUT_FIELD,
+                    msg,
+                    nodes_registry_sdk::field::VALIDATION_ERROR,
+                )
                 .create(),
         }
     }

@@ -43,15 +43,3 @@ impl From<toolkit_node_info::NodeInfoError> for DomainError {
         }
     }
 }
-
-impl From<DomainError> for nodes_registry_sdk::NodesRegistryError {
-    fn from(e: DomainError) -> Self {
-        match e {
-            DomainError::NodeNotFound(id) => Self::NodeNotFound(id),
-            DomainError::SysInfoCollectionFailed(msg) => Self::SysInfoCollectionFailed(msg),
-            DomainError::SysCapCollectionFailed(msg) => Self::SysCapCollectionFailed(msg),
-            DomainError::InvalidInput(msg) => Self::Validation(msg),
-            DomainError::Internal(_) => Self::Internal,
-        }
-    }
-}
