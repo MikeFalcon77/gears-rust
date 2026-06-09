@@ -14,8 +14,10 @@ Gears span three broad categories:
 - **Serverless** gears for functions, workflows, and event-driven execution;
 - **GenAI** gears for chat, retrieval, prompt orchestration, and related AI capabilities.
 
-See [OVERVIEW](docs/slides/1_OVERVIEW.html) HTML slides explaining the key Consructor Fabric Gears concepts.
-See [GEARS](docs/GEARS.md) for gears overview.
+See also:
+- [WHY_GEARS](docs/WHY_GEARS.md) explaining why to chose Rust/Gears for your XaaS project.
+- [OVERVIEW](docs/slides/1_OVERVIEW.html) HTML slides explaining the key Consructor Fabric Gears concepts.
+- [GEARS](docs/GEARS.md) for gears overview.
 
 **Five defining Gears characteristics:**
 
