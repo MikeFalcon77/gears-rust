@@ -15,7 +15,7 @@ date: 2026-06-08
   - [Confirmation](#confirmation)
 - [Pros and Cons of the Options](#pros-and-cons-of-the-options)
   - [(a) Single `GtsInstanceId`](#a-single-gtsinstanceid)
-  - [(b) Split `ResourceRef { resource_type, resource_id }`](#b-split-resourceref--resource_type-resource_id)
+  - [(b) Split `ResourceRef`](#b-split-resourceref)
   - [(c) Free-form / opaque string](#c-free-form--opaque-string)
 - [More Information](#more-information)
 - [Traceability](#traceability)
@@ -107,7 +107,7 @@ One GTS instance identifier carries type and id via `~`.
 * Bad, because for opaque resources it uses the §2.4 *combined* notation rather than the storage-canonical
   `{type, UUID}` split.
 
-### (b) Split `ResourceRef { resource_type, resource_id }`
+### (b) Split `ResourceRef`
 
 Type and id as separate fields.
 

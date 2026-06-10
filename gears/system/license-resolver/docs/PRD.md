@@ -30,6 +30,7 @@ system: cf
   - [7.1 Public API Surface](#71-public-api-surface)
   - [7.2 External Integration Contracts](#72-external-integration-contracts)
 - [8. Use Cases](#8-use-cases)
+  - [Gate Access to a Licensable Resource](#gate-access-to-a-licensable-resource)
 - [9. Acceptance Criteria](#9-acceptance-criteria)
 - [10. Dependencies](#10-dependencies)
 - [11. Assumptions](#11-assumptions)
@@ -308,7 +309,7 @@ bounded within that tenant (the current tenant-bounded model — see §11).
 
 ## 8. Use Cases
 
-#### Gate Access to a Licensable Resource
+### Gate Access to a Licensable Resource
 
 - [ ] `p2` - **ID**: `cpt-cf-license-resolver-usecase-gate-access`
 
