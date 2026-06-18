@@ -30,21 +30,27 @@
 // @cpt-cf-chat-engine-message-repo:p5
 // @cpt-cf-chat-engine-adr-message-tree-structure:p5
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chat_engine_sdk::models::{MessagePart, MessagePartInput};
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryOrder};
 use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use toolkit_db::secure::{
-    AccessScope, SecureDeleteExt, SecureEntityExt, SecureInsertExt, SecureUpdateExt, TxConfig,
+    AccessScope, DBRunner, SecureDeleteExt, SecureEntityExt, SecureInsertExt, SecureUpdateExt,
+    TxConfig,
 };
 use uuid::Uuid;
 
 use crate::domain::error::ChatEngineError;
-use crate::domain::message::Message;
+use crate::domain::message::{Message, part_type_to_entity};
 use crate::infra::db::entity::message::{self as message_entity, Entity as MessageEntity};
+use crate::infra::db::entity::message_part::{
+    self as message_part_entity, Entity as MessagePartEntity, compute_next_part_number,
+};
 use crate::infra::db::repo::ChatEngineDb;
 use crate::infra::db::{
     VARIANT_INDEX_MAX_RETRIES, compute_next_variant_index, is_variant_unique_violation,
@@ -68,9 +74,10 @@ pub struct NewUserMessage {
     /// [`MessageRepo::find_message_in_session`] — the repo only enforces FK
     /// integrity at the DB layer.
     pub parent_message_id: Option<Uuid>,
-    /// User-supplied message body (plugin-defined shape; persisted as
-    /// JSONB).
-    pub content: JsonValue,
+    /// User-supplied message body as an ordered list of typed parts. Persisted
+    /// into `message_parts` numbered `0..n` in list order. Must be non-empty
+    /// (the service rejects an empty body before reaching the repo).
+    pub parts: Vec<MessagePartInput>,
     /// Opaque external file UUIDs (Chat Engine never fetches the bytes).
     /// Stored as `Some(json-array)` when non-empty; `None` otherwise.
     pub file_ids: Option<Vec<Uuid>>,
@@ -286,6 +293,39 @@ impl SeaMessageRepo {
     pub fn new(db: Arc<ChatEngineDb>) -> Self {
         Self { db }
     }
+
+    /// Batch-load the ordered `message_parts` for the given messages and
+    /// attach them to each `Message.parts`. One query for the whole batch
+    /// (ordered by `message_id, number`); messages with no parts keep an
+    /// empty list. `From<message_entity::Model>` always yields `parts = []`,
+    /// so every read path that returns `Message`(s) funnels through here.
+    async fn attach_parts(&self, mut msgs: Vec<Message>) -> Result<Vec<Message>, ChatEngineError> {
+        if msgs.is_empty() {
+            return Ok(msgs);
+        }
+        let ids: Vec<Uuid> = msgs.iter().map(|m| m.message_id).collect();
+        let conn = self.db.conn()?;
+        let scope = AccessScope::allow_all();
+        let rows = MessagePartEntity::find()
+            .order_by_asc(message_part_entity::Column::MessageId)
+            .order_by_asc(message_part_entity::Column::Number)
+            .secure()
+            .scope_with(&scope)
+            .filter(Condition::all().add(message_part_entity::Column::MessageId.is_in(ids)))
+            .all(&conn)
+            .await?;
+
+        let mut by_msg: HashMap<Uuid, Vec<MessagePart>> = HashMap::new();
+        for row in rows {
+            by_msg.entry(row.message_id).or_default().push(row.into());
+        }
+        for m in &mut msgs {
+            if let Some(parts) = by_msg.remove(&m.message_id) {
+                m.parts = parts;
+            }
+        }
+        Ok(msgs)
+    }
 }
 
 #[async_trait]
@@ -304,7 +344,7 @@ impl MessageRepo for SeaMessageRepo {
             .as_ref()
             .filter(|ids| !ids.is_empty())
             .and_then(|ids| serde_json::to_value(ids).ok());
-        let content = req.content;
+        let parts = req.parts;
         let metadata = req.metadata;
         let tenant_id = req.tenant_id;
         let author_id = req.user_id;
@@ -314,7 +354,7 @@ impl MessageRepo for SeaMessageRepo {
             let user_message_id = Uuid::new_v4();
             let assistant_message_id = Uuid::new_v4();
             let now = OffsetDateTime::now_utc();
-            let content_attempt = content.clone();
+            let parts_attempt = parts.clone();
             let metadata_attempt = metadata.clone();
             let file_ids_attempt = file_ids_json.clone();
             let user_tenant = tenant_id.clone();
@@ -339,7 +379,6 @@ impl MessageRepo for SeaMessageRepo {
                             user_id: Set(author),
                             parent_message_id: Set(parent),
                             role: Set(message_entity::MessageRole::User),
-                            content: Set(content_attempt),
                             file_ids: Set(file_ids_attempt),
                             variant_index: Set(user_variant_index),
                             is_active: Set(true),
@@ -358,7 +397,6 @@ impl MessageRepo for SeaMessageRepo {
                             user_id: Set(None),
                             parent_message_id: Set(Some(user_message_id)),
                             role: Set(message_entity::MessageRole::Assistant),
-                            content: Set(empty_content()),
                             file_ids: Set(None),
                             variant_index: Set(0),
                             is_active: Set(true),
@@ -373,6 +411,9 @@ impl MessageRepo for SeaMessageRepo {
                             .scope_unchecked(&scope)?
                             .exec(tx)
                             .await?;
+                        // Persist the user message body as ordered parts; the
+                        // assistant stub starts part-less until finalize.
+                        insert_message_parts(tx, &scope, user_message_id, &parts_attempt).await?;
                         MessageEntity::insert(assistant_active)
                             .secure()
                             .scope_unchecked(&scope)?
@@ -412,19 +453,13 @@ impl MessageRepo for SeaMessageRepo {
         assistant_message_id: Uuid,
         outcome: FinalizeOutcome,
     ) -> Result<(), ChatEngineError> {
-        let (content, metadata, is_complete) = match outcome {
-            FinalizeOutcome::Complete { text, metadata } => {
-                (content_with_text(&text), metadata, true)
-            }
+        let (text, metadata, is_complete) = match outcome {
+            FinalizeOutcome::Complete { text, metadata } => (text, metadata, true),
             FinalizeOutcome::Cancelled { text } => {
                 let mut meta = serde_json::Map::new();
                 meta.insert("cancelled".into(), JsonValue::Bool(true));
                 meta.insert("partial".into(), JsonValue::Bool(true));
-                (
-                    content_with_text(&text),
-                    Some(JsonValue::Object(meta)),
-                    false,
-                )
+                (text, Some(JsonValue::Object(meta)), false)
             }
             FinalizeOutcome::Errored {
                 text,
@@ -438,38 +473,46 @@ impl MessageRepo for SeaMessageRepo {
                 );
                 meta.insert("error".into(), JsonValue::String(error));
                 meta.insert("partial".into(), JsonValue::Bool(true));
-                (
-                    content_with_text(&text),
-                    Some(JsonValue::Object(meta)),
-                    false,
-                )
+                (text, Some(JsonValue::Object(meta)), false)
             }
         };
 
-        let conn = self.db.conn()?;
-        let scope = AccessScope::allow_all();
-        // Single atomic UPDATE scoped to (message_id, session_id). The
-        // `is_complete = false AND metadata IS NULL` predicate matches
-        // only the still-pending stub state — any prior finalize leaves
-        // the row outside the match set, so a concurrent finalize cannot
-        // clobber the winner's terminal state.
-        let result = MessageEntity::update_many()
-            .secure()
-            .scope_with(&scope)
-            .filter(
-                Condition::all()
-                    .add(message_entity::Column::MessageId.eq(assistant_message_id))
-                    .add(message_entity::Column::SessionId.eq(session_id))
-                    .add(message_entity::Column::IsComplete.eq(false))
-                    .add(message_entity::Column::Metadata.is_null()),
-            )
-            .col_expr(message_entity::Column::Content, Expr::value(content))
-            .col_expr(message_entity::Column::IsComplete, Expr::value(is_complete))
-            .col_expr(message_entity::Column::Metadata, Expr::value(metadata))
-            .exec(&conn)
+        // The state flip and the text-part write are one transaction so a
+        // reader never sees a completed assistant row without its body. The
+        // `is_complete = false AND metadata IS NULL` predicate matches only
+        // the still-pending stub — any prior finalize leaves the row outside
+        // the match set, so a concurrent finalize cannot clobber the winner's
+        // terminal state, and only the winning UPDATE appends the part (no
+        // duplicate body on a double finalize).
+        let rows_affected = self
+            .db
+            .transaction(move |tx| {
+                Box::pin(async move {
+                    let scope = AccessScope::allow_all();
+                    let result = MessageEntity::update_many()
+                        .secure()
+                        .scope_with(&scope)
+                        .filter(
+                            Condition::all()
+                                .add(message_entity::Column::MessageId.eq(assistant_message_id))
+                                .add(message_entity::Column::SessionId.eq(session_id))
+                                .add(message_entity::Column::IsComplete.eq(false))
+                                .add(message_entity::Column::Metadata.is_null()),
+                        )
+                        .col_expr(message_entity::Column::IsComplete, Expr::value(is_complete))
+                        .col_expr(message_entity::Column::Metadata, Expr::value(metadata))
+                        .exec(tx)
+                        .await?;
+
+                    if result.rows_affected == 1 {
+                        append_text_part(tx, &scope, assistant_message_id, &text).await?;
+                    }
+                    Ok::<u64, ChatEngineError>(result.rows_affected)
+                })
+            })
             .await?;
 
-        if result.rows_affected == 0 {
+        if rows_affected == 0 {
             tracing::debug!(
                 session_id = %session_id,
                 assistant_message_id = %assistant_message_id,
@@ -503,7 +546,8 @@ impl MessageRepo for SeaMessageRepo {
         }
 
         let rows = query.all(&conn).await?;
-        Ok(rows.into_iter().map(Message::from).collect())
+        self.attach_parts(rows.into_iter().map(Message::from).collect())
+            .await
     }
 
     async fn find_message_in_session(
@@ -523,7 +567,13 @@ impl MessageRepo for SeaMessageRepo {
             )
             .one(&conn)
             .await?;
-        Ok(row.map(Message::from))
+        match row {
+            Some(row) => Ok(self
+                .attach_parts(vec![Message::from(row)])
+                .await?
+                .pop()),
+            None => Ok(None),
+        }
     }
 
     async fn list_active_path(&self, session_id: Uuid) -> Result<Vec<Message>, ChatEngineError> {
@@ -547,7 +597,8 @@ impl MessageRepo for SeaMessageRepo {
             )
             .all(&conn)
             .await?;
-        Ok(rows.into_iter().map(Message::from).collect())
+        self.attach_parts(rows.into_iter().map(Message::from).collect())
+            .await
     }
 
     async fn list_non_root_messages_chrono(
@@ -567,7 +618,8 @@ impl MessageRepo for SeaMessageRepo {
             )
             .all(&conn)
             .await?;
-        Ok(rows.into_iter().map(Message::from).collect())
+        self.attach_parts(rows.into_iter().map(Message::from).collect())
+            .await
     }
 
     async fn list_non_root_messages_older_than(
@@ -589,7 +641,8 @@ impl MessageRepo for SeaMessageRepo {
             )
             .all(&conn)
             .await?;
-        Ok(rows.into_iter().map(Message::from).collect())
+        self.attach_parts(rows.into_iter().map(Message::from).collect())
+            .await
     }
 
     async fn count_non_root_messages(&self, session_id: Uuid) -> Result<u64, ChatEngineError> {
@@ -676,7 +729,6 @@ impl MessageRepo for SeaMessageRepo {
     ) -> Result<Uuid, ChatEngineError> {
         let summary_id = Uuid::new_v4();
         let now = OffsetDateTime::now_utc();
-        let content = content_with_text(&text);
 
         let summary_active = message_entity::ActiveModel {
             message_id: Set(summary_id),
@@ -686,7 +738,6 @@ impl MessageRepo for SeaMessageRepo {
             user_id: Set(None),
             parent_message_id: Set(None),
             role: Set(message_entity::MessageRole::System),
-            content: Set(content),
             file_ids: Set(None),
             variant_index: Set(0),
             is_active: Set(true),
@@ -707,6 +758,8 @@ impl MessageRepo for SeaMessageRepo {
                         .scope_unchecked(&scope)?
                         .exec(tx)
                         .await?;
+                    // The summary body is a single text part.
+                    append_text_part(tx, &scope, summary_id, &text).await?;
                     if !summarized.is_empty() {
                         MessageEntity::update_many()
                             .secure()
@@ -836,7 +889,6 @@ impl MessageRepo for SeaMessageRepo {
                             user_id: Set(None),
                             parent_message_id: Set(Some(parent_message_id)),
                             role: Set(message_entity::MessageRole::Assistant),
-                            content: Set(empty_content()),
                             file_ids: Set(None),
                             variant_index: Set(new_variant_index),
                             is_active: Set(true),
@@ -911,15 +963,65 @@ fn retry_exhausted_conflict(last_err: Option<ChatEngineError>) -> ChatEngineErro
     })
 }
 
-/// Canonical empty content used for a newly-pre-allocated assistant stub.
-/// The SDK stores text under `content.text` (see ADR-0006); on stub creation
-/// we persist an empty string so the column is never NULL even before any
-/// chunk arrives.
-fn empty_content() -> JsonValue {
-    serde_json::json!({ "text": "" })
+/// Build the `content` JSON of a `text` part with the body under `text`
+/// (the SDK-canonical `{ "text": ... }` shape, see ADR-0006).
+fn text_part_content(text: &str) -> JsonValue {
+    serde_json::json!({ "text": text })
 }
 
-/// Build a `content` JSON value with the accumulated text under `text`.
-fn content_with_text(text: &str) -> JsonValue {
-    serde_json::json!({ "text": text })
+/// Insert `parts` for a freshly-created `message_id`, numbering them `0..n` in
+/// list order, inside the caller's transaction. The message must have no
+/// existing parts (create path); ordering is the list order.
+pub(crate) async fn insert_message_parts<R>(
+    runner: &R,
+    scope: &AccessScope,
+    message_id: Uuid,
+    parts: &[MessagePartInput],
+) -> Result<(), ChatEngineError>
+where
+    R: DBRunner,
+{
+    for (idx, part) in parts.iter().enumerate() {
+        let am = message_part_entity::ActiveModel {
+            id: Set(Uuid::new_v4()),
+            message_id: Set(message_id),
+            r#type: Set(part_type_to_entity(&part.part_type)),
+            content: Set(part.content.clone()),
+            number: Set(i32::try_from(idx).unwrap_or(i32::MAX)),
+        };
+        MessagePartEntity::insert(am)
+            .secure()
+            .scope_unchecked(scope)?
+            .exec(runner)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Append a single `text` part to `message_id` (number = `MAX(number)+1`)
+/// inside the caller's transaction. Used by finalize/summary which add the
+/// machine-generated text body after the message row already exists.
+async fn append_text_part<R>(
+    runner: &R,
+    scope: &AccessScope,
+    message_id: Uuid,
+    text: &str,
+) -> Result<(), ChatEngineError>
+where
+    R: DBRunner,
+{
+    let number = compute_next_part_number(runner, message_id).await?;
+    let am = message_part_entity::ActiveModel {
+        id: Set(Uuid::new_v4()),
+        message_id: Set(message_id),
+        r#type: Set(message_part_entity::MessagePartType::Text),
+        content: Set(text_part_content(text)),
+        number: Set(number),
+    };
+    MessagePartEntity::insert(am)
+        .secure()
+        .scope_unchecked(scope)?
+        .exec(runner)
+        .await?;
+    Ok(())
 }

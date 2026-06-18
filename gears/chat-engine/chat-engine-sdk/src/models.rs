@@ -345,8 +345,11 @@ pub struct Message {
     pub is_active: bool,
     /// Who produced the message: user / assistant / system.
     pub role: MessageRole,
-    /// Message payload (plugin-defined shape: text, content parts array, etc.).
-    pub content: serde_json::Value,
+    /// Ordered, typed body fragments. The parts in `number` order form the
+    /// message body (replaces the former single `content` blob). Empty only
+    /// for a freshly-created assistant stub before its text part is persisted.
+    #[serde(default)]
+    pub parts: Vec<MessagePart>,
     /// External file UUIDs referenced by this message. Chat Engine forwards
     /// them opaquely — file content is never fetched by Chat Engine itself.
     #[serde(default)]
@@ -389,6 +392,72 @@ pub enum MessageRole {
     Assistant,
     /// Internal/system message (summaries, tool output, injected context).
     System,
+}
+
+/// Type discriminant for a [`MessagePart`]. The base set is fixed; plugin
+/// vendors extend it via GTS without forking Chat Engine core.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessagePartType {
+    /// Plain text: `{ text, title? }`.
+    Text,
+    /// Code block: `{ language, code }`.
+    Code,
+    /// One or more image references: `{ images: [{ image_id, mime_type?, .. }] }`.
+    Images,
+    /// One or more video references: `{ videos: [{ video_id, mime_type?, .. }] }`.
+    Videos,
+    /// Link preview cards: `{ links: [{ url, title?, .. }] }`.
+    Links,
+    /// Progress/status indicators: `{ statuses: [{ code, detail? }] }`.
+    Statuses,
+}
+
+/// The wire / plugin shape of a message part before persistence: a `type`
+/// plus its typed `content`. Chat Engine assigns `id` and `number` on persist
+/// and returns a full [`MessagePart`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagePartInput {
+    /// Discriminates the `content` shape.
+    #[serde(rename = "type")]
+    pub part_type: MessagePartType,
+    /// Typed payload; shape determined by `part_type`. Kept as JSON because the
+    /// per-type shapes are plugin-extensible (validated structurally, not here).
+    pub content: serde_json::Value,
+}
+
+/// A persisted, ordered fragment of a message body.
+///
+/// A message owns one or more parts; the parts in `number` order are the
+/// message body. Persisted in the `message_parts` table with a CASCADE foreign
+/// key to `messages` (see DESIGN `cpt-cf-chat-engine-design-entity-message-part`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagePart {
+    /// Unique part identifier (primary key).
+    pub id: Uuid,
+    /// Message this part belongs to.
+    pub message_id: Uuid,
+    /// Discriminates the `content` shape.
+    #[serde(rename = "type")]
+    pub part_type: MessagePartType,
+    /// Typed payload; shape determined by `part_type`.
+    pub content: serde_json::Value,
+    /// 0-based ordinal within the message; unique per message.
+    pub number: u32,
+}
+
+impl MessagePart {
+    /// Convenience constructor for a `text` part with the given body.
+    #[must_use]
+    pub fn text(id: Uuid, message_id: Uuid, number: u32, text: impl Into<String>) -> Self {
+        Self {
+            id,
+            message_id,
+            part_type: MessagePartType::Text,
+            content: serde_json::json!({ "text": text.into() }),
+            number,
+        }
+    }
 }
 
 /// Schema declaration of a capability supported by a backend plugin.

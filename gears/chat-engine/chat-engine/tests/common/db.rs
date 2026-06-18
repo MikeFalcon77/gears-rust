@@ -21,14 +21,13 @@
 use std::sync::Arc;
 
 use chat_engine::infra::db::Migrator;
-use chat_engine::infra::db::entity::{message, session, session_type};
+use chat_engine::infra::db::entity::{message, message_part, session, session_type};
 use chat_engine::infra::db::repo::ChatEngineDb;
 use chat_engine::infra::db::repo::message_repo::{MessageRepo, SeaMessageRepo};
 use chat_engine::infra::db::repo::plugin_config_repo::{PluginConfigRepo, SeaPluginConfigRepo};
 use chat_engine::infra::db::repo::session_repo::{SeaSessionRepo, SessionRepo};
 use chat_engine::infra::db::repo::session_type_repo::{SeaSessionTypeRepo, SessionTypeRepo};
 use sea_orm::{ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryOrder};
-use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use toolkit_db::secure::{AccessScope, SecureEntityExt, SecureInsertExt};
 use toolkit_db::{ConnectOpts, DBProvider, connect_db};
@@ -159,7 +158,6 @@ pub async fn seed_message(
         user_id: Set(None),
         parent_message_id: Set(parent_message_id),
         role: Set(message::MessageRole::User),
-        content: Set(JsonValue::Object(serde_json::Map::new())),
         file_ids: Set(None),
         variant_index: Set(variant_index),
         is_active: Set(true),
@@ -231,17 +229,76 @@ pub async fn find_assistant_message(
         .expect("find assistant row")
 }
 
-/// Pull `content.text` from a persisted message row. Returns the empty
-/// string for any non-conforming shape so callers can stay terse.
-pub fn message_text(model: &message::Model) -> String {
-    match &model.content {
-        JsonValue::Object(map) => map
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned)
-            .unwrap_or_default(),
-        _ => String::new(),
+/// Return the parts of every message with `role` in `session_id`, ordered by
+/// `number`, as `(type_string, number, content)` tuples. Used by part-aware
+/// persistence assertions (FR-022).
+pub async fn message_parts_ordered(
+    db: &Arc<ChatEngineDb>,
+    session_id: Uuid,
+    role: &str,
+) -> Vec<(String, i32, serde_json::Value)> {
+    let conn = db.conn().expect("conn for message_parts_ordered");
+    let scope = AccessScope::allow_all();
+    let msgs = message::Entity::find()
+        .secure()
+        .scope_with(&scope)
+        .filter(
+            Condition::all()
+                .add(message::Column::SessionId.eq(session_id))
+                .add(message::Column::Role.eq(role)),
+        )
+        .all(&conn)
+        .await
+        .expect("load messages by role");
+    let ids: Vec<Uuid> = msgs.iter().map(|m| m.message_id).collect();
+    let rows = message_part::Entity::find()
+        .order_by_asc(message_part::Column::Number)
+        .secure()
+        .scope_with(&scope)
+        .filter(Condition::all().add(message_part::Column::MessageId.is_in(ids)))
+        .all(&conn)
+        .await
+        .expect("load message parts");
+    rows.into_iter()
+        .map(|p| (part_type_str(&p.r#type).to_owned(), p.number, p.content))
+        .collect()
+}
+
+/// Map a persisted part-type enum to its wire string (test-side mirror of the
+/// domain mapping).
+fn part_type_str(t: &message_part::MessagePartType) -> &'static str {
+    match t {
+        message_part::MessagePartType::Text => "text",
+        message_part::MessagePartType::Code => "code",
+        message_part::MessagePartType::Images => "images",
+        message_part::MessagePartType::Videos => "videos",
+        message_part::MessagePartType::Links => "links",
+        message_part::MessagePartType::Statuses => "statuses",
     }
+}
+
+/// Concatenate the `text` part bodies of a persisted message (ordered by
+/// `number`). Returns the empty string when the message has no text parts.
+/// Reads `message_parts` since the body no longer lives on `messages`.
+pub async fn message_text(db: &Arc<ChatEngineDb>, message_id: Uuid) -> String {
+    let conn = db.conn().expect("conn for message_text");
+    let scope = AccessScope::allow_all();
+    let rows = message_part::Entity::find()
+        .order_by_asc(message_part::Column::Number)
+        .secure()
+        .scope_with(&scope)
+        .filter(
+            Condition::all()
+                .add(message_part::Column::MessageId.eq(message_id))
+                .add(message_part::Column::Type.eq("text")),
+        )
+        .all(&conn)
+        .await
+        .expect("load message parts");
+    rows.iter()
+        .filter_map(|p| p.content.get("text").and_then(|v| v.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Poll until the assistant row for `session_id` reaches `is_complete =

@@ -47,10 +47,10 @@ use tracing::{info, instrument};
 use uuid::Uuid;
 
 use crate::domain::error::{ChatEngineError, Result};
-use crate::domain::message::{Message, MessageRole};
+use crate::domain::message::{Message, MessagePart, MessageRole, message_text};
 use crate::domain::search::{
     Cursor, MAX_QUERY_LENGTH, MessageRef, SearchError, SearchPage, SearchQuery, SearchResult,
-    SessionMeta, extract_searchable_text, make_snippet, sanitize_for_tsquery,
+    SessionMeta, make_snippet, sanitize_for_tsquery,
 };
 use crate::domain::service::session_service::Identity;
 use crate::infra::db::repo::message_repo::MessageRepo;
@@ -118,7 +118,7 @@ pub struct BackendHit {
     pub session_id: Uuid,
     pub parent_message_id: Option<Uuid>,
     pub role: MessageRole,
-    pub content: serde_json::Value,
+    pub parts: Vec<MessagePart>,
     pub created_at: time::OffsetDateTime,
     /// Relevance score. SQLite backend returns `0.0`.
     pub rank: f32,
@@ -206,7 +206,7 @@ impl SearchBackend for InMemorySearchBackend {
             })
             .filter(|(_, m)| !m.is_hidden_from_user)
             .filter(|(_, m)| {
-                let text = extract_searchable_text(&m.content);
+                let text = message_text(&m.parts);
                 text.to_lowercase().contains(&needle)
             })
             .map(|(_, m)| BackendHit {
@@ -214,7 +214,7 @@ impl SearchBackend for InMemorySearchBackend {
                 session_id: m.session_id,
                 parent_message_id: m.parent_message_id,
                 role: m.role.clone(),
-                content: m.content.clone(),
+                parts: m.parts.clone(),
                 created_at: m.created_at,
                 rank: 0.0,
             })
@@ -435,7 +435,7 @@ impl SearchService {
             let parent_chain = self
                 .load_parent_chain(hit.session_id, hit.parent_message_id)
                 .await?;
-            let snippet = make_snippet(&extract_searchable_text(&hit.content), &parsed.raw);
+            let snippet = make_snippet(&message_text(&hit.parts), &parsed.raw);
             let session_metadata = match kind {
                 SearchScope::CrossSession => self.load_session_meta(scope, hit.session_id).await?,
                 SearchScope::Session => None,
@@ -498,7 +498,7 @@ impl SearchService {
             out.push(MessageRef {
                 message_id: m.message_id,
                 role: m.role.clone(),
-                content: m.content.clone(),
+                parts: m.parts.clone(),
                 created_at: m.created_at,
             });
         }
@@ -527,7 +527,7 @@ impl SearchService {
             chain.push(MessageRef {
                 message_id: m.message_id,
                 role: m.role.clone(),
-                content: m.content.clone(),
+                parts: m.parts.clone(),
                 created_at: m.created_at,
             });
             match m.parent_message_id {
@@ -819,7 +819,7 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role,
-            content: serde_json::json!({"text": text}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, text)],
             file_ids: vec![],
             metadata: None,
             is_complete: true,
@@ -1077,8 +1077,8 @@ mod tests {
         let ctx = &page.items[0].context_messages;
         assert_eq!(ctx.len(), 2);
         // First context message is the "before-1" (chronologically earliest).
-        assert!(extract_searchable_text(&ctx[0].content).contains("before-1"));
-        assert!(extract_searchable_text(&ctx[1].content).contains("after-1"));
+        assert!(message_text(&ctx[0].parts).contains("before-1"));
+        assert!(message_text(&ctx[1].parts).contains("after-1"));
     }
 
     #[tokio::test]

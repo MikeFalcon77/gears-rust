@@ -343,7 +343,12 @@ mod message_plugin_ctx_debug_tests {
             variant_index: 0,
             is_active: true,
             role,
-            content: serde_json::json!({ "text": secret_text }),
+            parts: vec![crate::models::MessagePart::text(
+                Uuid::nil(),
+                Uuid::nil(),
+                0,
+                secret_text,
+            )],
             file_ids: vec![],
             metadata: None,
             is_complete: true,

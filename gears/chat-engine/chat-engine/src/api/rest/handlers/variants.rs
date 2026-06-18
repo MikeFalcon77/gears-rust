@@ -30,7 +30,7 @@ use axum::body::Body;
 use axum::extract::Path;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{Json, Response};
-use chat_engine_sdk::models::{CapabilityValue, VariantInfo};
+use chat_engine_sdk::models::{CapabilityValue, MessagePart, MessagePartInput, VariantInfo};
 use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -63,7 +63,8 @@ pub struct RecreateBody {
 /// `POST /sessions/{s}/messages/{m}/branch`.
 #[derive(Debug, Deserialize)]
 pub struct BranchBody {
-    pub content: JsonValue,
+    #[serde(default)]
+    pub parts: Vec<MessagePartInput>,
     #[serde(default)]
     pub file_ids: Option<Vec<Uuid>>,
     #[serde(default)]
@@ -127,7 +128,7 @@ pub struct ListVariantsEntry {
     pub total_variants: u32,
     pub is_active: bool,
     pub is_complete: bool,
-    pub content: JsonValue,
+    pub parts: Vec<MessagePart>,
     pub metadata: Option<JsonValue>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
@@ -146,7 +147,7 @@ impl From<VariantListing> for ListVariantsResponse {
                     total_variants: info.total_variants,
                     is_active: info.is_active,
                     is_complete: message.is_complete,
-                    content: message.content,
+                    parts: message.parts,
                     metadata: message.metadata,
                     created_at: message.created_at,
                 })
@@ -214,7 +215,7 @@ pub async fn branch_message(
             &identity,
             session_id,
             message_id,
-            body.content,
+            body.parts,
             body.file_ids,
             body.enabled_capabilities,
             cancel.clone(),
@@ -414,7 +415,7 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role: MessageRole::Assistant,
-            content: serde_json::json!({"text": "hi"}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "hi")],
             file_ids: vec![],
             metadata: None,
             is_complete: true,

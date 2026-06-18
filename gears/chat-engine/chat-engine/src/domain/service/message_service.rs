@@ -38,7 +38,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chat_engine_sdk::error::PluginError;
-use chat_engine_sdk::models::{CapabilityValue, LifecycleState, TenantId, UserId};
+use chat_engine_sdk::models::{
+    CapabilityValue, LifecycleState, MessagePartInput, TenantId, UserId,
+};
 use chat_engine_sdk::plugin::{
     MessagePluginCtx, PluginCallContext, PluginStream, SessionPluginCtx,
 };
@@ -94,7 +96,9 @@ pub const DEFAULT_PLUGIN_DEADLINE: Duration = Duration::from_mins(2);
 #[derive(Debug, Clone)]
 pub struct SendMessageRequest {
     pub session_id: Uuid,
-    pub content: JsonValue,
+    /// Ordered, typed body parts of the user message (FR-022). Must be
+    /// non-empty — validated in `validate_request`.
+    pub parts: Vec<MessagePartInput>,
     pub file_ids: Vec<Uuid>,
     pub parent_message_id: Option<Uuid>,
     pub capabilities: Option<Vec<CapabilityValue>>,
@@ -981,9 +985,9 @@ impl MessageService {
         req: &SendMessageRequest,
         identity: &Identity,
     ) -> Result<ValidatedRequest> {
-        if extract_text(&req.content).is_empty() {
+        if req.parts.is_empty() {
             return Err(ChatEngineError::bad_request(
-                "message content must not be empty",
+                "message must have at least one part",
             ));
         }
 
@@ -1084,7 +1088,7 @@ impl MessageService {
             tenant_id: Some(identity.tenant_id.clone()),
             user_id: Some(identity.user_id.clone()),
             parent_message_id: req.parent_message_id,
-            content: req.content.clone(),
+            parts: req.parts.clone(),
             file_ids: if req.file_ids.is_empty() {
                 None
             } else {
@@ -1434,20 +1438,6 @@ enum DriverOutcome {
 struct ValidatedRequest {
     session_type_id: Uuid,
     plugin_instance_id: String,
-}
-
-/// Pull the canonical text payload out of a message `content` JSON value.
-/// Empty strings (and absent/non-string `text` keys) collapse to `""`.
-fn extract_text(content: &JsonValue) -> String {
-    match content {
-        JsonValue::String(s) => s.clone(),
-        JsonValue::Object(map) => map
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned)
-            .unwrap_or_default(),
-        _ => String::new(),
-    }
 }
 
 /// Names of capabilities currently enabled on a session, decoded from the
@@ -1887,7 +1877,10 @@ mod tests {
     fn make_request(session_id: Uuid) -> SendMessageRequest {
         SendMessageRequest {
             session_id,
-            content: serde_json::json!({"text": "hello"}),
+            parts: vec![MessagePartInput {
+                part_type: chat_engine_sdk::models::MessagePartType::Text,
+                content: serde_json::json!({"text": "hello"}),
+            }],
             file_ids: vec![],
             parent_message_id: None,
             capabilities: None,
@@ -2089,11 +2082,11 @@ mod tests {
         let (svc, sessions, _messages) = make_service(plugin_id, plugin_dyn, session_type_id, None);
 
         let mut req = make_request(sessions.session_id());
-        req.content = serde_json::json!({"text": ""});
+        req.parts = vec![];
         let cancel = CancellationToken::new();
         let result = svc.send_message(req, make_identity(), cancel).await;
         let err = match result {
-            Ok(_) => panic!("empty content must be rejected"),
+            Ok(_) => panic!("message with no parts must be rejected"),
             Err(e) => e,
         };
         assert!(matches!(err, ChatEngineError::BadRequest { .. }));
@@ -2127,14 +2120,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_text_handles_object_string_and_other() {
-        assert_eq!(extract_text(&serde_json::json!({"text": "hi"})), "hi");
-        assert_eq!(extract_text(&serde_json::json!("hello")), "hello");
-        assert_eq!(extract_text(&serde_json::json!({})), "");
-        assert_eq!(extract_text(&serde_json::json!(42)), "");
-    }
-
-    #[test]
     fn finish_reason_for_maps_variants() {
         assert_eq!(finish_reason_for(&PluginError::timeout()), "timeout");
         assert_eq!(
@@ -2152,7 +2137,9 @@ mod tests {
     // Phase 7 — context management tests
     // ============================================================
 
-    use chat_engine_sdk::models::{MessageRole, TenantId as SdkTenantId, UserId as SdkUserId};
+    use chat_engine_sdk::models::{
+        MessagePart, MessageRole, TenantId as SdkTenantId, UserId as SdkUserId,
+    };
 
     /// Mock `MessageRepo` whose `list_active_path` returns a caller-supplied
     /// sequence — lets `apply_memory_strategy` tests stay in-process.
@@ -2232,7 +2219,7 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role: MessageRole::User,
-            content: serde_json::json!({"text": format!("msg-{idx}")}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, format!("msg-{idx}"))],
             file_ids: vec![],
             metadata: None,
             is_complete: true,
@@ -2254,7 +2241,7 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role: MessageRole::User,
-            content: serde_json::json!({"text": "CURRENT"}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "CURRENT")],
             file_ids: vec![],
             metadata: None,
             is_complete: true,
@@ -2929,7 +2916,7 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role: MessageRole::User,
-            content: serde_json::json!({"text": "x"}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "x")],
             file_ids: vec![],
             metadata: None,
             is_complete: true,

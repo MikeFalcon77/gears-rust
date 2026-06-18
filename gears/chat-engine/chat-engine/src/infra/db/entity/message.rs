@@ -37,8 +37,6 @@ pub struct Model {
     pub user_id: Option<String>,
     pub parent_message_id: Option<Uuid>,
     pub role: MessageRole,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub content: serde_json::Value,
     #[sea_orm(column_type = "JsonBinary", nullable)]
     pub file_ids: Option<serde_json::Value>,
     pub variant_index: i32,
@@ -88,6 +86,8 @@ pub enum Relation {
     Parent,
     #[sea_orm(has_many = "super::message_reaction::Entity")]
     Reaction,
+    #[sea_orm(has_many = "super::message_part::Entity")]
+    Part,
 }
 
 impl Related<super::session::Entity> for Entity {
@@ -99,6 +99,12 @@ impl Related<super::session::Entity> for Entity {
 impl Related<super::message_reaction::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Reaction.def()
+    }
+}
+
+impl Related<super::message_part::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Part.def()
     }
 }
 
@@ -263,9 +269,9 @@ mod tests {
             DatabaseBackend::Sqlite,
             format!(
                 "INSERT INTO messages (message_id, session_id, parent_message_id, role, \
-                 content, file_ids, variant_index, is_active, is_complete, \
+                 file_ids, variant_index, is_active, is_complete, \
                  is_hidden_from_user, is_hidden_from_backend, metadata, created_at) \
-                 VALUES ('{root_id}', '{session_id}', NULL, 'user', '{{\"text\":\"a\"}}', \
+                 VALUES ('{root_id}', '{session_id}', NULL, 'user', \
                  NULL, 0, 1, 1, 0, 0, NULL, '{now}')",
             ),
         ))
@@ -276,10 +282,10 @@ mod tests {
             DatabaseBackend::Sqlite,
             format!(
                 "INSERT INTO messages (message_id, session_id, parent_message_id, role, \
-                 content, file_ids, variant_index, is_active, is_complete, \
+                 file_ids, variant_index, is_active, is_complete, \
                  is_hidden_from_user, is_hidden_from_backend, metadata, created_at) \
                  VALUES ('{child_id}', '{session_id}', '{root_id}', 'assistant', \
-                 '{{\"text\":\"b\"}}', NULL, 0, 1, 1, 0, 0, NULL, '{now}')",
+                 NULL, 0, 1, 1, 0, 0, NULL, '{now}')",
             ),
         ))
         .await
@@ -293,10 +299,10 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 format!(
                     "INSERT INTO messages (message_id, session_id, parent_message_id, \
-                     role, content, file_ids, variant_index, is_active, is_complete, \
+                     role, file_ids, variant_index, is_active, is_complete, \
                      is_hidden_from_user, is_hidden_from_backend, metadata, created_at) \
                      VALUES ('{dup_id}', '{session_id}', '{root_id}', 'assistant', \
-                     '{{\"text\":\"c\"}}', NULL, 0, 1, 1, 0, 0, NULL, '{now}')",
+                     NULL, 0, 1, 1, 0, 0, NULL, '{now}')",
                 ),
             ))
             .await
@@ -362,9 +368,9 @@ mod tests {
                 DatabaseBackend::Sqlite,
                 format!(
                     "INSERT INTO messages (message_id, session_id, parent_message_id, \
-                     role, content, file_ids, variant_index, is_active, is_complete, \
+                     role, file_ids, variant_index, is_active, is_complete, \
                      is_hidden_from_user, is_hidden_from_backend, metadata, created_at) \
-                     VALUES ('{id}', '{session_id}', NULL, 'user', '{{\"text\":\"r\"}}', \
+                     VALUES ('{id}', '{session_id}', NULL, 'user', \
                      NULL, 0, 1, 1, 0, 0, NULL, '{now}')",
                 ),
             )

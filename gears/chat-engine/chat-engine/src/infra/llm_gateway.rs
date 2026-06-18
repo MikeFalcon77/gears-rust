@@ -875,7 +875,12 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role,
-            content: serde_json::json!({ "text": text }),
+            parts: vec![chat_engine_sdk::models::MessagePart::text(
+                uuid::Uuid::nil(),
+                uuid::Uuid::nil(),
+                0,
+                text,
+            )],
             file_ids: vec![],
             metadata: None,
             is_complete: true,

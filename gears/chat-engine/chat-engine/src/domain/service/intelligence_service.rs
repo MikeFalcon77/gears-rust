@@ -997,7 +997,7 @@ mod tests {
     use super::*;
 
     use async_trait::async_trait;
-    use chat_engine_sdk::models::{LifecycleState, MessageRole};
+    use chat_engine_sdk::models::{LifecycleState, MessagePart, MessageRole};
     use chat_engine_sdk::plugin::ChatEngineBackendPlugin;
     use parking_lot::Mutex;
     use time::OffsetDateTime;
@@ -1403,7 +1403,7 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role: MessageRole::User,
-            content: serde_json::json!({"text": "hi"}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "hi")],
             file_ids: vec![],
             metadata: None,
             is_complete: true,

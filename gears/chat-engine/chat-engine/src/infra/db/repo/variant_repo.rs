@@ -11,9 +11,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chat_engine_sdk::models::MessagePartInput;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryOrder};
-use serde_json::{Value as JsonValue, json};
+use serde_json::Value as JsonValue;
 use time::OffsetDateTime;
 use toolkit_db::secure::{
     AccessScope, SecureEntityExt, SecureInsertExt, SecureUpdateExt, TxConfig,
@@ -73,12 +74,13 @@ impl VariantRepo for SeaVariantRepo {
         &self,
         session_id: Uuid,
         parent_message_id: Uuid,
-        content: JsonValue,
+        parts: Vec<MessagePartInput>,
         file_ids: Option<Vec<Uuid>>,
         tenant_id: Option<String>,
         user_id: Option<String>,
     ) -> Result<(Uuid, i32, Uuid)> {
         use crate::infra::db::entity::message as message_entity;
+        use crate::infra::db::repo::message_repo::insert_message_parts;
         use crate::infra::db::{
             VARIANT_INDEX_MAX_RETRIES, compute_next_variant_index, is_variant_unique_violation,
         };
@@ -101,7 +103,7 @@ impl VariantRepo for SeaVariantRepo {
             let user_message_id = Uuid::new_v4();
             let assistant_message_id = Uuid::new_v4();
             let now = OffsetDateTime::now_utc();
-            let content_attempt = content.clone();
+            let parts_attempt = parts.clone();
             let file_ids_attempt = file_ids_json.clone();
             let user_tenant = tenant_id.clone();
             let author = user_id.clone();
@@ -125,7 +127,6 @@ impl VariantRepo for SeaVariantRepo {
                             user_id: Set(author),
                             parent_message_id: Set(Some(parent_message_id)),
                             role: Set(message_entity::MessageRole::User),
-                            content: Set(content_attempt),
                             file_ids: Set(file_ids_attempt),
                             variant_index: Set(user_variant_index),
                             is_active: Set(true),
@@ -143,7 +144,6 @@ impl VariantRepo for SeaVariantRepo {
                             user_id: Set(None),
                             parent_message_id: Set(Some(user_message_id)),
                             role: Set(message_entity::MessageRole::Assistant),
-                            content: Set(json!({ "text": "" })),
                             file_ids: Set(None),
                             variant_index: Set(0),
                             is_active: Set(true),
@@ -158,6 +158,8 @@ impl VariantRepo for SeaVariantRepo {
                             .scope_unchecked(&scope)?
                             .exec(tx)
                             .await?;
+                        // Persist the branch user message body as ordered parts.
+                        insert_message_parts(tx, &scope, user_message_id, &parts_attempt).await?;
                         message_entity::Entity::insert(assistant_active)
                             .secure()
                             .scope_unchecked(&scope)?

@@ -23,7 +23,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use chat_engine_sdk::models::{
-    CapabilityValue, LifecycleState, Message as SdkMessage, MessageRole, Session as SdkSession,
+    CapabilityValue, LifecycleState, Message as SdkMessage, MessagePart as SdkMessagePart,
+    MessagePartInput as SdkMessagePartInput, MessagePartType, MessageRole, Session as SdkSession,
     SessionType as SdkSessionType, VariantInfo,
 };
 
@@ -133,6 +134,77 @@ impl From<SdkSessionType> for SessionTypeDto {
 // Message DTOs
 // ---------------------------------------------------------------------------
 
+/// Wire-shape of a persisted message part (FR-022).
+#[api_dto(request, response)]
+#[derive(Debug, Clone)]
+pub struct MessagePartDto {
+    pub id: Uuid,
+    #[serde(rename = "type")]
+    pub part_type: String,
+    pub content: JsonValue,
+    pub number: u32,
+}
+
+impl From<SdkMessagePart> for MessagePartDto {
+    fn from(p: SdkMessagePart) -> Self {
+        Self {
+            id: p.id,
+            part_type: part_type_to_wire(p.part_type).to_owned(),
+            content: p.content,
+            number: p.number,
+        }
+    }
+}
+
+/// Wire-shape of an inbound message part (no `id`/`number`; assigned on persist).
+#[api_dto(request, response)]
+#[derive(Debug, Clone)]
+pub struct MessagePartInputDto {
+    #[serde(rename = "type")]
+    pub part_type: String,
+    pub content: JsonValue,
+}
+
+impl From<MessagePartInputDto> for SdkMessagePartInput {
+    fn from(d: MessagePartInputDto) -> Self {
+        Self {
+            part_type: part_type_from_wire(&d.part_type),
+            content: d.content,
+        }
+    }
+}
+
+/// Total, lossless mapping of a part type to its wire string.
+fn part_type_to_wire(t: MessagePartType) -> &'static str {
+    match t {
+        MessagePartType::Text => "text",
+        MessagePartType::Code => "code",
+        MessagePartType::Images => "images",
+        MessagePartType::Videos => "videos",
+        MessagePartType::Links => "links",
+        MessagePartType::Statuses => "statuses",
+    }
+}
+
+/// Parse a wire part-type string, defaulting unknown values to `text` so a
+/// malformed body never panics. Strict validation lives in the service layer.
+fn part_type_from_wire(s: &str) -> MessagePartType {
+    match s {
+        "code" => MessagePartType::Code,
+        "images" => MessagePartType::Images,
+        "videos" => MessagePartType::Videos,
+        "links" => MessagePartType::Links,
+        "statuses" => MessagePartType::Statuses,
+        _ => MessagePartType::Text,
+    }
+}
+
+/// Convenience: convert wire parts to the SDK input shape.
+#[must_use]
+pub fn parts_into_sdk(parts: Vec<MessagePartInputDto>) -> Vec<SdkMessagePartInput> {
+    parts.into_iter().map(SdkMessagePartInput::from).collect()
+}
+
 /// Wire-shape projection of [`SdkMessage`].
 #[api_dto(request, response)]
 #[derive(Debug, Clone)]
@@ -144,7 +216,8 @@ pub struct MessageDto {
     pub variant_index: u32,
     pub is_active: bool,
     pub role: String,
-    pub content: JsonValue,
+    #[serde(default)]
+    pub parts: Vec<MessagePartDto>,
     #[serde(default)]
     pub file_ids: Vec<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -167,7 +240,7 @@ impl From<SdkMessage> for MessageDto {
             variant_index: m.variant_index,
             is_active: m.is_active,
             role: role_to_wire(&m.role).to_owned(),
-            content: m.content,
+            parts: m.parts.into_iter().map(MessagePartDto::from).collect(),
             file_ids: m.file_ids,
             metadata: m.metadata,
             is_complete: m.is_complete,
@@ -191,7 +264,8 @@ fn role_to_wire(role: &MessageRole) -> &'static str {
 #[api_dto(request)]
 #[derive(Debug, Clone)]
 pub struct SendMessageRequestDto {
-    pub content: JsonValue,
+    #[serde(default)]
+    pub parts: Vec<MessagePartInputDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_ids: Option<Vec<Uuid>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

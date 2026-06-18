@@ -27,6 +27,7 @@ use std::time::Duration;
 use chat_engine::domain::service::message_service::{MessageService, SendMessageRequest};
 use chat_engine::domain::service::plugin_service::PluginService;
 use chat_engine::domain::service::session_service::Identity;
+use chat_engine_sdk::models::{MessagePartInput, MessagePartType};
 use chat_engine_sdk::{ChatEngineBackendPlugin, PluginError, StreamingChunkEvent, StreamingEvent};
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -67,7 +68,10 @@ fn build_service(
 fn make_request(session_id: Uuid) -> SendMessageRequest {
     SendMessageRequest {
         session_id,
-        content: serde_json::json!({"text": "hello"}),
+        parts: vec![MessagePartInput {
+            part_type: MessagePartType::Text,
+            content: serde_json::json!({"text": "hello"}),
+        }],
         file_ids: vec![],
         parent_message_id: None,
         capabilities: None,
@@ -155,7 +159,7 @@ async fn cancel_after_partial_chunks_persists_is_complete_false_against_sqlite()
         "cancelled assistant row MUST be is_complete=false; persisted row = {row:?}"
     );
     assert_eq!(
-        db::message_text(&row),
+        db::message_text(&harness.db, row.message_id).await,
         "alpha-beta-",
         "persisted partial content must equal the chunks emitted before cancel",
     );
@@ -177,6 +181,68 @@ async fn cancel_after_partial_chunks_persists_is_complete_false_against_sqlite()
     );
     // Plugin was invoked exactly once per request.
     assert_eq!(plugin.call_count(), 1);
+}
+
+// ===========================================================================
+// 1a. Multi-part body — a message sent with several ordered typed parts
+//     persists them into message_parts and reads them back in order (FR-022).
+// ===========================================================================
+
+#[tokio::test]
+async fn multi_part_user_message_round_trips_in_order_against_sqlite() {
+    let harness = db::setup_sqlite().await;
+    let plugin_id = "multi-part-plugin";
+    let session_type_id = db::seed_session_type(&harness, plugin_id).await;
+    let session_id = db::seed_active_session(&harness, TENANT_ID, USER_ID, session_type_id).await;
+
+    let plugin = FakePlugin::new(plugin_id, FakePluginScript::Events(vec![]));
+    let plugin_dyn: Arc<dyn ChatEngineBackendPlugin> = plugin;
+    let svc = build_service(&harness, plugin_id, plugin_dyn);
+
+    // text → code → links, in that order.
+    let req = SendMessageRequest {
+        session_id,
+        parts: vec![
+            MessagePartInput {
+                part_type: MessagePartType::Text,
+                content: serde_json::json!({"text": "look at this"}),
+            },
+            MessagePartInput {
+                part_type: MessagePartType::Code,
+                content: serde_json::json!({"language": "rust", "code": "fn main() {}"}),
+            },
+            MessagePartInput {
+                part_type: MessagePartType::Links,
+                content: serde_json::json!({"links": [{"url": "https://example.com"}]}),
+            },
+        ],
+        file_ids: vec![],
+        parent_message_id: None,
+        capabilities: None,
+    };
+
+    let cancel = CancellationToken::new();
+    let mut stream = svc
+        .send_message(req, make_identity(), cancel)
+        .await
+        .expect("send_message dispatch");
+    while stream.next().await.is_some() {}
+
+    // Read the user message's parts directly, ordered by `number`.
+    let parts = db::message_parts_ordered(&harness.db, session_id, "user").await;
+    let types: Vec<&str> = parts.iter().map(|(t, _, _)| t.as_str()).collect();
+    assert_eq!(
+        types,
+        vec!["text", "code", "links"],
+        "parts must persist in submitted order",
+    );
+    let numbers: Vec<i32> = parts.iter().map(|(_, n, _)| *n).collect();
+    assert_eq!(numbers, vec![0, 1, 2], "part numbers must be 0-based and contiguous");
+    assert_eq!(
+        parts[1].2.get("language").and_then(|v| v.as_str()),
+        Some("rust"),
+        "code part content must round-trip verbatim",
+    );
 }
 
 // ===========================================================================
@@ -291,7 +357,7 @@ async fn pre_stream_timeout_persists_finish_reason_against_sqlite() {
         "pre-stream timeout row MUST be is_complete=false; row = {row:?}",
     );
     assert_eq!(
-        db::message_text(&row),
+        db::message_text(&harness.db, row.message_id).await,
         "",
         "pre-stream timeout must persist empty content (no chunks observed)",
     );

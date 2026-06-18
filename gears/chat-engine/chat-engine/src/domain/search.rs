@@ -28,7 +28,7 @@ use toolkit_macros::domain_model;
 use uuid::Uuid;
 
 use crate::domain::error::ChatEngineError;
-use crate::domain::message::MessageRole;
+use crate::domain::message::{MessagePart, MessageRole};
 
 /// Maximum allowed query string length (characters). Inputs longer than this
 /// are rejected with `QueryTooLong` before any sanitisation runs.
@@ -133,9 +133,9 @@ pub struct SearchResult {
 pub struct MessageRef {
     pub message_id: Uuid,
     pub role: MessageRole,
-    /// Raw content JSONB. The UI is responsible for projecting `content.text`
-    /// (SDK convention) versus structured content parts.
-    pub content: serde_json::Value,
+    /// Ordered, typed body parts (FR-022). The UI renders each part by its
+    /// `type`; `text` parts carry the searchable body.
+    pub parts: Vec<MessagePart>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
 }
@@ -672,7 +672,7 @@ mod tests {
         let r = MessageRef {
             message_id: Uuid::nil(),
             role: MessageRole::User,
-            content: serde_json::json!({"text": "x"}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "x")],
             created_at: OffsetDateTime::UNIX_EPOCH,
         };
         let s = serde_json::to_string(&r).unwrap();

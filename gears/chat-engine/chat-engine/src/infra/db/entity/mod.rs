@@ -1,4 +1,5 @@
 pub mod message;
+pub mod message_part;
 pub mod message_reaction;
 pub mod plugin_config;
 pub mod session;

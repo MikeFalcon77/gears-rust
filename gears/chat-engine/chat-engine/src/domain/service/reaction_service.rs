@@ -430,7 +430,7 @@ mod tests {
     use time::OffsetDateTime;
     use toolkit::ClientHub;
 
-    use crate::domain::message::{Message, MessageRole};
+    use crate::domain::message::{Message, MessagePart, MessageRole};
     use crate::infra::db::entity::{
         session as session_entity, session_type as session_type_entity,
     };
@@ -582,7 +582,7 @@ mod tests {
                 variant_index: 0,
                 is_active: true,
                 role: MessageRole::Assistant,
-                content: serde_json::json!({"text": "hi"}),
+                parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "hi")],
                 file_ids: vec![],
                 metadata: None,
                 is_complete: true,
@@ -607,7 +607,7 @@ mod tests {
                 variant_index: 0,
                 is_active: true,
                 role: MessageRole::User,
-                content: serde_json::json!({"text": "hi"}),
+                parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "hi")],
                 file_ids: vec![],
                 metadata: None,
                 is_complete: true,

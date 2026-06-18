@@ -61,7 +61,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Messages::UserId).string().null())
                     .col(ColumnDef::new(Messages::ParentMessageId).uuid().null())
                     .col(ColumnDef::new(Messages::Role).string().not_null())
-                    .col(ColumnDef::new(Messages::Content).json_binary().not_null())
                     .col(ColumnDef::new(Messages::FileIds).json_binary().null())
                     .col(
                         ColumnDef::new(Messages::VariantIndex)
@@ -188,10 +187,62 @@ impl MigrationTrait for Migration {
             sea_orm::DatabaseBackend::MySql => {}
         }
 
+        // Message body lives in `message_parts` (ordered typed parts) rather
+        // than a `messages.content` blob — see DESIGN
+        // `cpt-cf-chat-engine-dbtable-message-parts`. CASCADE FK so a hard
+        // message delete removes its parts; UNIQUE(message_id, number) backs
+        // the `compute_next_part_number` allocation.
+        manager
+            .create_table(
+                Table::create()
+                    .table(MessageParts::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(MessageParts::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
+                    .col(ColumnDef::new(MessageParts::MessageId).uuid().not_null())
+                    .col(ColumnDef::new(MessageParts::Type).string().not_null())
+                    .col(ColumnDef::new(MessageParts::Content).json_binary().not_null())
+                    .col(ColumnDef::new(MessageParts::Number).integer().not_null())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk_message_parts_message")
+                            .from(MessageParts::Table, MessageParts::MessageId)
+                            .to(Messages::Table, Messages::MessageId)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_index(
+                Index::create()
+                    .name("uq_message_parts_message_number")
+                    .table(MessageParts::Table)
+                    .col(MessageParts::MessageId)
+                    .col(MessageParts::Number)
+                    .unique()
+                    .to_owned(),
+            )
+            .await?;
+
         Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(MessageParts::Table)
+                    .if_exists()
+                    .to_owned(),
+            )
+            .await?;
+
         match manager.get_database_backend() {
             sea_orm::DatabaseBackend::Postgres | sea_orm::DatabaseBackend::Sqlite => {
                 manager
@@ -253,7 +304,6 @@ pub enum Messages {
     UserId,
     ParentMessageId,
     Role,
-    Content,
     FileIds,
     VariantIndex,
     IsActive,
@@ -262,4 +312,14 @@ pub enum Messages {
     IsHiddenFromBackend,
     Metadata,
     CreatedAt,
+}
+
+#[derive(DeriveIden)]
+pub enum MessageParts {
+    Table,
+    Id,
+    MessageId,
+    Type,
+    Content,
+    Number,
 }

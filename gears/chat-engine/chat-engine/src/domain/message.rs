@@ -23,14 +23,16 @@
 // @cpt-cf-chat-engine-domain-message:p2
 
 pub use chat_engine_sdk::models::{
-    Message, MessageRole, StreamingChunkEvent, StreamingCompleteEvent, StreamingErrorEvent,
-    StreamingEvent, StreamingStartEvent, TenantId, UserId, VariantInfo,
+    Message, MessagePart, MessagePartInput, MessagePartType, MessageRole, StreamingChunkEvent,
+    StreamingCompleteEvent, StreamingErrorEvent, StreamingEvent, StreamingStartEvent, TenantId,
+    UserId, VariantInfo,
 };
 
 use sea_orm::ActiveValue::Set;
 use uuid::Uuid;
 
 use crate::infra::db::entity::message as message_entity;
+use crate::infra::db::entity::message_part as message_part_entity;
 
 impl From<message_entity::Model> for Message {
     fn from(m: message_entity::Model) -> Self {
@@ -59,7 +61,10 @@ impl From<message_entity::Model> for Message {
             variant_index,
             is_active: m.is_active,
             role,
-            content: m.content,
+            // Parts live in their own table; `From<Model>` yields a message
+            // with an empty `parts` list. The repo read methods attach the
+            // ordered parts via `attach_parts` after this conversion.
+            parts: Vec::new(),
             file_ids,
             metadata: m.metadata,
             is_complete: m.is_complete,
@@ -90,7 +95,6 @@ impl From<Message> for message_entity::ActiveModel {
             user_id: Set(m.user_id.map(|u| u.as_str().to_owned())),
             parent_message_id: Set(m.parent_message_id),
             role: Set(role_to_entity(&m.role)),
-            content: Set(m.content),
             file_ids: Set(file_ids_json),
             variant_index: Set(i32::try_from(m.variant_index).unwrap_or(i32::MAX)),
             is_active: Set(m.is_active),
@@ -123,6 +127,82 @@ fn role_to_entity(role: &MessageRole) -> message_entity::MessageRole {
     }
 }
 
+/// Concatenate the bodies of all `text`-typed parts of a message in `number`
+/// order, joined by newlines. Non-text parts contribute nothing. This is the
+/// canonical "plain text of a message" used by search matching, export
+/// rendering, and any caller that needs a flat string view of the body.
+#[must_use]
+pub fn message_text(parts: &[MessagePart]) -> String {
+    let mut texts = parts.iter().filter_map(|p| {
+        if p.part_type == MessagePartType::Text {
+            p.content.get("text").and_then(|v| v.as_str())
+        } else {
+            None
+        }
+    });
+    let mut out = String::new();
+    if let Some(first) = texts.next() {
+        out.push_str(first);
+    }
+    for t in texts {
+        out.push('\n');
+        out.push_str(t);
+    }
+    out
+}
+
+impl From<message_part_entity::Model> for MessagePart {
+    fn from(p: message_part_entity::Model) -> Self {
+        MessagePart {
+            id: p.id,
+            message_id: p.message_id,
+            part_type: part_type_from_entity(&p.r#type),
+            content: p.content,
+            // Stored `i32`, exposed as `u32`. Negative is impossible by
+            // construction (`compute_next_part_number` starts at 0); clamp
+            // defensively rather than panic at the boundary.
+            number: u32::try_from(p.number).unwrap_or(0),
+        }
+    }
+}
+
+impl From<MessagePart> for message_part_entity::ActiveModel {
+    fn from(p: MessagePart) -> Self {
+        message_part_entity::ActiveModel {
+            id: Set(p.id),
+            message_id: Set(p.message_id),
+            r#type: Set(part_type_to_entity(&p.part_type)),
+            content: Set(p.content),
+            number: Set(i32::try_from(p.number).unwrap_or(i32::MAX)),
+        }
+    }
+}
+
+/// Map the persisted entity part type to the SDK/domain type. Total and
+/// exhaustive — the entity enum makes invalid types unrepresentable.
+pub fn part_type_from_entity(t: &message_part_entity::MessagePartType) -> MessagePartType {
+    match t {
+        message_part_entity::MessagePartType::Text => MessagePartType::Text,
+        message_part_entity::MessagePartType::Code => MessagePartType::Code,
+        message_part_entity::MessagePartType::Images => MessagePartType::Images,
+        message_part_entity::MessagePartType::Videos => MessagePartType::Videos,
+        message_part_entity::MessagePartType::Links => MessagePartType::Links,
+        message_part_entity::MessagePartType::Statuses => MessagePartType::Statuses,
+    }
+}
+
+/// Map the SDK/domain part type to the persisted entity type.
+pub fn part_type_to_entity(t: &MessagePartType) -> message_part_entity::MessagePartType {
+    match t {
+        MessagePartType::Text => message_part_entity::MessagePartType::Text,
+        MessagePartType::Code => message_part_entity::MessagePartType::Code,
+        MessagePartType::Images => message_part_entity::MessagePartType::Images,
+        MessagePartType::Videos => message_part_entity::MessagePartType::Videos,
+        MessagePartType::Links => message_part_entity::MessagePartType::Links,
+        MessagePartType::Statuses => message_part_entity::MessagePartType::Statuses,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,7 +217,6 @@ mod tests {
             user_id: Some("user-1".to_string()),
             parent_message_id: None,
             role: message_entity::MessageRole::Assistant,
-            content: serde_json::json!({"text": "hi"}),
             file_ids: Some(serde_json::json!(["00000000-0000-0000-0000-000000000001"])),
             variant_index: 2,
             is_active: true,
@@ -192,7 +271,7 @@ mod tests {
             variant_index: 3,
             is_active: false,
             role: MessageRole::User,
-            content: serde_json::json!({"text": "hello"}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "hello")],
             file_ids: vec![Uuid::nil()],
             metadata: None,
             is_complete: true,
@@ -223,7 +302,7 @@ mod tests {
             variant_index: 0,
             is_active: false,
             role: MessageRole::System,
-            content: serde_json::json!({}),
+            parts: vec![],
             file_ids: vec![],
             metadata: None,
             is_complete: true,

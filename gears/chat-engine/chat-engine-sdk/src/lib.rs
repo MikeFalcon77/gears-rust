@@ -17,9 +17,9 @@ pub mod plugin;
 pub use error::PluginError;
 pub use models::{
     Capability, CapabilityValue, HealthStatus, LifecycleState, MemoryStrategy, Message,
-    MessageRole, RetentionPolicy, Session, SessionType, StreamingChunkEvent,
-    StreamingCompleteEvent, StreamingErrorEvent, StreamingEvent, StreamingStartEvent, TenantId,
-    UserId, VariantInfo,
+    MessagePart, MessagePartInput, MessagePartType, MessageRole, RetentionPolicy, Session,
+    SessionType, StreamingChunkEvent, StreamingCompleteEvent, StreamingErrorEvent, StreamingEvent,
+    StreamingStartEvent, TenantId, UserId, VariantInfo,
 };
 pub use plugin::{
     ChatEngineBackendPlugin, MessagePluginCtx, PluginCallContext, PluginStream, SessionPluginCtx,

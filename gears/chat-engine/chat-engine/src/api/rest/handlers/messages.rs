@@ -33,7 +33,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::field::Empty;
 use uuid::Uuid;
 
-use chat_engine_sdk::models::CapabilityValue;
+use chat_engine_sdk::models::{CapabilityValue, MessagePartInput};
 use toolkit_security::SecurityContext;
 
 use crate::api::rest::handlers::sessions::{identity_from_ctx, reject_body_identity};
@@ -46,9 +46,10 @@ use crate::domain::service::message_service::{DeleteOutcome, MessageService, Sen
 pub struct SendMessageBody {
     /// Target session. Must already exist and be owned by the JWT subject.
     pub session_id: Uuid,
-    /// Message payload (plugin-defined shape; `{"text": "…"}` is the
-    /// canonical default).
-    pub content: JsonValue,
+    /// Ordered, typed body parts (FR-022). Each `{type, content}`; must be
+    /// non-empty (validated in the service layer).
+    #[serde(default)]
+    pub parts: Vec<MessagePartInput>,
     /// Optional external file UUIDs forwarded opaquely to the plugin.
     #[serde(default)]
     pub file_ids: Option<Vec<Uuid>>,
@@ -101,7 +102,7 @@ pub async fn send_message(
 
     let req = SendMessageRequest {
         session_id: body.session_id,
-        content: body.content,
+        parts: body.parts,
         file_ids: body.file_ids.unwrap_or_default(),
         parent_message_id: body.parent_message_id,
         capabilities: body.capabilities,

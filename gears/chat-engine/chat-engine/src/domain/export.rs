@@ -35,7 +35,7 @@ use toolkit_macros::domain_model;
 use uuid::Uuid;
 
 use crate::domain::error::ChatEngineError;
-use crate::domain::message::MessageRole;
+use crate::domain::message::{MessagePart, MessageRole};
 
 /// Cryptographic share-link token granting read-only access to a session.
 ///
@@ -179,7 +179,7 @@ pub struct ExportSessionMeta {
 pub struct MessageView {
     pub message_id: Uuid,
     pub role: MessageRole,
-    pub content: serde_json::Value,
+    pub parts: Vec<MessagePart>,
     /// Per-message metadata. Stripped of plugin-injected fields unless
     /// the caller passes `include_plugin_metadata=true`.
     pub metadata: Option<serde_json::Value>,

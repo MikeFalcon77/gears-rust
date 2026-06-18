@@ -48,7 +48,7 @@ use crate::domain::export::{
     ExportFormat, ExportSessionMeta, ExportStorage, ExportedSession, MessageView, ShareTokenIssue,
     SharedSessionView, generate_share_token,
 };
-use crate::domain::message::{Message, MessageRole};
+use crate::domain::message::{Message, MessagePart, MessagePartType, MessageRole};
 use crate::domain::service::session_service::Identity;
 use crate::domain::session::{
     LifecycleState, Session, get_share_expires_at, public_metadata, set_share_expires_at,
@@ -424,7 +424,7 @@ fn build_message_views(messages: &[Message], include_plugin_metadata: bool) -> V
             MessageView {
                 message_id: m.message_id,
                 role: m.role.clone(),
-                content: m.content.clone(),
+                parts: m.parts.clone(),
                 metadata,
                 created_at: m.created_at,
             }
@@ -495,7 +495,7 @@ fn render_markdown(meta: &ExportSessionMeta, messages: &[MessageView]) -> Vec<u8
             .unwrap_or_else(|_| String::from("?"));
         writeln!(out, "## {} — {}", role_label(&msg.role), ts).ok();
         writeln!(out).ok();
-        writeln!(out, "{}", content_to_markdown_body(&msg.content)).ok();
+        writeln!(out, "{}", parts_to_markdown_body(&msg.parts)).ok();
         writeln!(out).ok();
     }
 
@@ -510,16 +510,25 @@ fn role_label(role: &MessageRole) -> &'static str {
     }
 }
 
-fn content_to_markdown_body(content: &JsonValue) -> String {
-    // The SDK convention is `{ "text": "..." }`. Fall back to the raw
-    // JSON representation so plugin-defined content shapes (content
-    // parts, tool calls, …) survive the export without crashing the
-    // renderer.
-    if let Some(text) = content.get("text").and_then(|v| v.as_str()) {
-        text.to_owned()
-    } else {
-        serde_json::to_string_pretty(content).unwrap_or_else(|_| String::from("<unserializable>"))
+fn parts_to_markdown_body(parts: &[MessagePart]) -> String {
+    // Render each part in order: `text` parts as their body (SDK convention
+    // `{ "text": "..." }`), other typed parts as pretty JSON so plugin-defined
+    // shapes survive the export without crashing the renderer.
+    let mut blocks: Vec<String> = Vec::with_capacity(parts.len());
+    for p in parts {
+        let block = if p.part_type == MessagePartType::Text {
+            p.content
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned)
+                .unwrap_or_default()
+        } else {
+            serde_json::to_string_pretty(&p.content)
+                .unwrap_or_else(|_| String::from("<unserializable>"))
+        };
+        blocks.push(block);
     }
+    blocks.join("\n\n")
 }
 
 fn build_storage_key(
@@ -755,7 +764,7 @@ mod tests {
             variant_index: 0,
             is_active: true,
             role,
-            content: json!({"text": text}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, text)],
             file_ids: Vec::new(),
             metadata: Some(json!({"plugin": "gpt", "request_id": "r1", "user_field": "ok"})),
             is_complete: true,
@@ -1096,7 +1105,7 @@ mod tests {
         let views = vec![MessageView {
             message_id: Uuid::nil(),
             role: MessageRole::User,
-            content: json!({"text": "hello"}),
+            parts: vec![MessagePart::text(Uuid::nil(), Uuid::nil(), 0, "hello")],
             metadata: None,
             created_at: OffsetDateTime::UNIX_EPOCH,
         }];

@@ -55,7 +55,7 @@ use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
 use chat_engine_sdk::models::{
-    Capability, CapabilityValue, LifecycleState, TenantId, UserId, VariantInfo,
+    Capability, CapabilityValue, LifecycleState, MessagePartInput, TenantId, UserId, VariantInfo,
 };
 use chat_engine_sdk::plugin::{PluginCallContext, SessionPluginCtx};
 
@@ -136,7 +136,7 @@ pub trait VariantRepo: Send + Sync {
         &self,
         session_id: Uuid,
         parent_message_id: Uuid,
-        content: JsonValue,
+        parts: Vec<MessagePartInput>,
         file_ids: Option<Vec<Uuid>>,
         tenant_id: Option<String>,
         user_id: Option<String>,
@@ -600,7 +600,7 @@ impl VariantService {
     /// [`MessageService::dispatch_to_plugin`] with
     /// [`MessageEventKind::New`].
     #[instrument(
-        skip(self, identity, content, cancel),
+        skip(self, identity, parts, cancel),
         fields(
             session_id = %session_id,
             branch_point_message_id = %branch_point_message_id,
@@ -612,7 +612,7 @@ impl VariantService {
         identity: &Identity,
         session_id: Uuid,
         branch_point_message_id: Uuid,
-        content: JsonValue,
+        parts: Vec<MessagePartInput>,
         file_ids: Option<Vec<Uuid>>,
         capabilities: Option<Vec<CapabilityValue>>,
         cancel: CancellationToken,
@@ -655,7 +655,7 @@ impl VariantService {
             .insert_user_and_assistant_stub_for_branch(
                 session_id,
                 branch_point_message_id,
-                content,
+                parts,
                 file_ids,
                 Some(identity.tenant_id.clone()),
                 Some(identity.user_id.clone()),
@@ -1199,7 +1199,7 @@ mod tests {
             &self,
             session_id: Uuid,
             parent_message_id: Uuid,
-            _content: JsonValue,
+            _parts: Vec<MessagePartInput>,
             _file_ids: Option<Vec<Uuid>>,
             _tenant_id: Option<String>,
             _user_id: Option<String>,
@@ -1285,7 +1285,10 @@ mod tests {
                 .insert_user_and_assistant_stub_for_branch(
                     session_id,
                     parent_message_id,
-                    json!({"text": "x"}),
+                    vec![MessagePartInput {
+                        part_type: chat_engine_sdk::models::MessagePartType::Text,
+                        content: json!({"text": "x"}),
+                    }],
                     None,
                     None,
                     None,
