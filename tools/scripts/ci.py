@@ -13,6 +13,7 @@ from urllib.error import URLError, HTTPError
 sys.path.insert(0, os.path.dirname(__file__))
 
 from lib.platform import (
+    e2e_env_overrides,
     find_binary,
     kill_port_holder,
     popen_new_group,
@@ -206,7 +207,10 @@ def _print_log_file(path, label):
     try:
         if "../" in path or "..\\" in path:
             raise Exception("Invalid file path")
-        with open(path) as f:
+        # Logs may contain non-ASCII bytes; force UTF-8 and never let a
+        # decode error mask the server output we are trying to surface
+        # (Python defaults to cp1252 on Windows, which raises on such bytes).
+        with open(path, encoding="utf-8", errors="replace") as f:
             content = f.read()
             if content:
                 print(content, end="" if content.endswith("\n") else "\n")
@@ -410,6 +414,11 @@ def cmd_e2e(args):
             # Set RUST_LOG to enable debug logging for types_registry module
             server_env = os.environ.copy()
             server_env["RUST_LOG"] = "types_registry=debug,info"
+            # Apply per-OS server config overrides (e.g. grpc-hub TCP on
+            # Windows, where the config's UDS address is unsupported).
+            # setdefault keeps any explicit user-provided override.
+            for key, value in e2e_env_overrides().items():
+                server_env.setdefault(key, value)
             try:
                 server_process = popen_new_group(
                     server_cmd,

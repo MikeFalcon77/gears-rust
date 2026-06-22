@@ -22,6 +22,7 @@ import yaml
 # Import prereq gear for environment validation
 from lib.prereq import check_environment_ready
 from lib.platform import (
+    e2e_env_overrides,
     find_binary,
     popen_new_group,
     read_e2e_features,
@@ -783,6 +784,12 @@ def start_instrumented_server(config_file, output_dir, port=None):
     target_dir = PROJECT_ROOT / "target" / "llvm-cov-target"
     env2["CARGO_TARGET_DIR"] = str(target_dir)
     env2["LLVM_PROFILE_FILE"] = str(target_dir / "cf-gears-%p-%m.profraw")
+
+    # Apply per-OS server config overrides (e.g. grpc-hub TCP on Windows,
+    # where the config's UDS address is unsupported). setdefault keeps any
+    # explicit user-provided override.
+    for key, value in e2e_env_overrides().items():
+        env2.setdefault(key, value)
 
     build_instrumented_server(env2, target_dir)
 
