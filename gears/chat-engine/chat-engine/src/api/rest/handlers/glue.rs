@@ -28,7 +28,7 @@ use crate::api::rest::dto::{
     VariantInfoDto, VariantListDto, parts_into_sdk,
 };
 use crate::api::rest::handlers::sessions::identity_from_ctx;
-use crate::api::rest::ndjson_stream_response;
+use crate::api::rest::sse_delta_stream_response;
 use crate::domain::error::{ChatEngineError, Result};
 use crate::domain::reaction::ReactionType;
 use crate::domain::search::SearchQuery;
@@ -70,7 +70,7 @@ pub async fn send_message_in_session(
     };
     let cancel = CancellationToken::new();
     let stream = svc.send_message(req, identity, cancel.clone()).await?;
-    Ok(ndjson_stream_response(stream, cancel))
+    Ok(sse_delta_stream_response(stream, cancel))
 }
 
 /// `GET /chat-engine/v1/sessions/{id}/messages` — list the active path.
@@ -127,7 +127,7 @@ pub async fn recreate_message(
             cancel.clone(),
         )
         .await?;
-    Ok(ndjson_stream_response(stream, cancel))
+    Ok(sse_delta_stream_response(stream, cancel))
 }
 
 /// `GET /chat-engine/v1/messages/{id}/variants` — list sibling variants.
@@ -211,7 +211,7 @@ pub async fn summarize_session(
     let stream = svc
         .summarize_session(&identity, session_id, cancel.clone())
         .await?;
-    Ok(ndjson_stream_response(stream, cancel))
+    Ok(sse_delta_stream_response(stream, cancel))
 }
 
 /// `POST /chat-engine/v1/sessions/{id}/search` — JSON-body variant that

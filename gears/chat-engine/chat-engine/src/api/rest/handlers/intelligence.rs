@@ -17,15 +17,11 @@
 // @cpt-cf-chat-engine-flow-session-intelligence-get-retention:p8
 // @cpt-cf-chat-engine-flow-session-intelligence-update-retention:p8
 
-use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::Json;
-use axum::body::Body;
 use axum::extract::{Extension, Path};
-use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
-use futures::stream::StreamExt;
 use serde_json::Value as JsonValue;
 use tokio_util::sync::CancellationToken;
 use tracing::field::Empty;
@@ -34,7 +30,9 @@ use uuid::Uuid;
 use toolkit_security::SecurityContext;
 
 use crate::api::rest::handlers::sessions::{identity_from_ctx, reject_body_identity};
-use crate::domain::error::{ChatEngineError, Result};
+#[cfg(test)]
+use crate::domain::error::ChatEngineError;
+use crate::domain::error::Result;
 use crate::domain::retention::RetentionPolicy;
 use crate::domain::service::intelligence_service::IntelligenceService;
 
@@ -88,39 +86,13 @@ pub async fn summarize_session(
         .summarize_session(&identity, session_id, cancel.clone())
         .await?;
 
-    // One NDJSON line per StreamingEvent — the wire format mirrors the
-    // existing message-send pipeline (Phase 5).
-    let ndjson = event_stream.map(|evt| {
-        let mut buf = serde_json::to_vec(&evt).unwrap_or_else(|err| {
-            tracing::error!(error = %err, "failed to serialize summary StreamingEvent");
-            br#"{"type":"error","error":"internal serialization failure"}"#.to_vec()
-        });
-        buf.push(b'\n');
-        std::result::Result::<_, Infallible>::Ok(buf)
-    });
-
-    let body = Body::from_stream(ndjson);
-
-    let mut response = Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-ndjson"),
-        )
-        .header(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))
-        .header("x-accel-buffering", HeaderValue::from_static("no"))
-        .body(body)
-        .map_err(|err| {
-            ChatEngineError::internal(format!("failed to build summary response: {err}"))
-        })?;
-
-    // Drop-on-close guard: cancels the service-side driver when axum
-    // drops the response body (client disconnect).
-    response
-        .extensions_mut()
-        .insert(SummaryDropGuard::new(cancel));
-
-    Ok(response)
+    // Project the summary stream into the shared SSE delta protocol (FR-024);
+    // the helper ties `cancel` to the body lifetime (client-disconnect → driver
+    // cancel).
+    Ok(crate::api::rest::sse_delta_stream_response(
+        event_stream,
+        cancel,
+    ))
 }
 
 /// `GET /sessions/{id}/retention-policy` — returns the effective
@@ -155,40 +127,6 @@ pub async fn patch_retention_policy(
         .update_session_retention_policy(&identity, session_id, body.policy)
         .await?;
     Ok(Json(updated))
-}
-
-// ---------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------
-
-/// Cancel-on-drop guard. Stored on the response so when axum drops the
-/// body (client disconnect / response close), the token cancels and the
-/// service-side driver task observes it via `cancel.cancelled()`.
-#[derive(Clone)]
-struct SummaryDropGuard {
-    #[allow(
-        dead_code,
-        reason = "kept alive for Drop side-effect on response close"
-    )]
-    inner: std::sync::Arc<SummaryDropGuardInner>,
-}
-
-struct SummaryDropGuardInner {
-    token: CancellationToken,
-}
-
-impl SummaryDropGuard {
-    fn new(token: CancellationToken) -> Self {
-        Self {
-            inner: std::sync::Arc::new(SummaryDropGuardInner { token }),
-        }
-    }
-}
-
-impl Drop for SummaryDropGuardInner {
-    fn drop(&mut self) {
-        self.token.cancel();
-    }
 }
 
 #[cfg(test)]

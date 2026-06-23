@@ -22,16 +22,12 @@
 // @cpt-cf-chat-engine-adr-branching-strategy:p6
 // @cpt-cf-chat-engine-adr-session-switching:p6
 
-use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::Extension;
-use axum::body::Body;
 use axum::extract::Path;
-use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{Json, Response};
 use chat_engine_sdk::models::{CapabilityValue, MessagePart, MessagePartInput, VariantInfo};
-use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tokio_util::sync::CancellationToken;
@@ -336,60 +332,11 @@ fn stream_to_ndjson_response(
     stream: crate::domain::service::message_service::SendMessageStream,
     cancel: CancellationToken,
 ) -> Result<Response> {
-    let ndjson = stream.map(|evt| {
-        let mut buf = serde_json::to_vec(&evt).unwrap_or_else(|err| {
-            tracing::error!(error = %err, "failed to serialize StreamingEvent");
-            br#"{"type":"error","error":"internal serialization failure"}"#.to_vec()
-        });
-        buf.push(b'\n');
-        std::result::Result::<_, Infallible>::Ok(buf)
-    });
-
-    let body = Body::from_stream(ndjson);
-    let mut response = Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-ndjson"),
-        )
-        .header(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))
-        .header("x-accel-buffering", HeaderValue::from_static("no"))
-        .body(body)
-        .map_err(|err| {
-            ChatEngineError::internal(format!("failed to build streaming response: {err}"))
-        })?;
-
-    response.extensions_mut().insert(DropGuard::new(cancel));
-    Ok(response)
-}
-
-/// Cancel-on-drop guard. Stored on the response so axum cancels the
-/// underlying token when the body is dropped (client disconnect).
-#[derive(Clone)]
-struct DropGuard {
-    #[allow(
-        dead_code,
-        reason = "kept alive for Drop side-effect on response close"
-    )]
-    inner: std::sync::Arc<DropGuardInner>,
-}
-
-struct DropGuardInner {
-    token: CancellationToken,
-}
-
-impl DropGuard {
-    fn new(token: CancellationToken) -> Self {
-        Self {
-            inner: std::sync::Arc::new(DropGuardInner { token }),
-        }
-    }
-}
-
-impl Drop for DropGuardInner {
-    fn drop(&mut self) {
-        self.token.cancel();
-    }
+    // Delegates to the shared SSE delta-stream builder (FR-024): the plugin
+    // event stream is projected into `start`/`delta`/`complete`/`error` SSE
+    // frames, and the cancel token is tied to the body's lifetime (cancels the
+    // driver on client disconnect).
+    Ok(crate::api::rest::sse_delta_stream_response(stream, cancel))
 }
 
 // ============================================================================

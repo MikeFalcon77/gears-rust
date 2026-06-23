@@ -16,16 +16,12 @@
 // @cpt-cf-chat-engine-adr-streaming-architecture:p5
 // @cpt-cf-chat-engine-adr-streaming-cancellation:p5
 
-use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::Extension;
 use axum::Json;
-use axum::body::Body;
 use axum::extract::Path;
-use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
-use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use time::format_description::well_known::Rfc3339;
@@ -110,81 +106,13 @@ pub async fn send_message(
 
     let event_stream = svc.send_message(req, identity, cancel.clone()).await?;
 
-    // Map each StreamingEvent → one NDJSON line. We intentionally use
-    // `axum::body::Body::from_stream` rather than a typed-Json response
-    // builder so the framework emits Transfer-Encoding: chunked without
-    // buffering — first-byte latency is on the critical path.
-    let ndjson = event_stream.map(|evt| {
-        // Serialization should never fail for the SDK's StreamingEvent
-        // (all fields are Serialize); if it does, fall back to a
-        // best-effort error line so the connection still closes
-        // cleanly rather than hanging on a broken sink.
-        let mut buf = serde_json::to_vec(&evt).unwrap_or_else(|err| {
-            tracing::error!(error = %err, "failed to serialize StreamingEvent");
-            br#"{"type":"error","error":"internal serialization failure"}"#.to_vec()
-        });
-        buf.push(b'\n');
-        std::result::Result::<_, Infallible>::Ok(buf)
-    });
-
-    let body = Body::from_stream(ndjson);
-
-    let mut response = Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-ndjson"),
-        )
-        .header(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))
-        // Defeat nginx response buffering so chunks actually flush.
-        .header("x-accel-buffering", HeaderValue::from_static("no"))
-        .body(body)
-        .map_err(|err| {
-            ChatEngineError::internal(format!("failed to build streaming response: {err}"))
-        })?;
-
-    // Hand the cancellation token off to a background task that watches
-    // the response body's drop signal — when axum drops the body (client
-    // disconnect, transport close), the token is cancelled and the
-    // service-side driver task observes it.
-    //
-    // axum 0.7 exposes the drop notification via the body itself; we
-    // approximate by attaching the token to a guard inside an extension
-    // on the response. The handler does not own the body lifecycle
-    // directly, so this guard is the simplest portable wiring.
-    response.extensions_mut().insert(DropGuard::new(cancel));
-
-    Ok(response)
-}
-
-/// Cancel-on-drop guard. Stored on the response so that when axum drops
-/// the response (client disconnect, body close), the token cancels and
-/// the service-side driver task observes it via `cancel.cancelled()`.
-#[derive(Clone)]
-struct DropGuard {
-    #[allow(
-        dead_code,
-        reason = "kept alive for Drop side-effect on response close"
-    )]
-    inner: std::sync::Arc<DropGuardInner>,
-}
-
-struct DropGuardInner {
-    token: CancellationToken,
-}
-
-impl DropGuard {
-    fn new(token: CancellationToken) -> Self {
-        Self {
-            inner: std::sync::Arc::new(DropGuardInner { token }),
-        }
-    }
-}
-
-impl Drop for DropGuardInner {
-    fn drop(&mut self) {
-        self.token.cancel();
-    }
+    // Project the plugin event stream into the client-facing SSE delta
+    // protocol (FR-024). The shared helper ties `cancel` to the response
+    // body's lifetime, so a client disconnect cancels the driver task.
+    Ok(crate::api::rest::sse_delta_stream_response(
+        event_stream,
+        cancel,
+    ))
 }
 
 /// Wire response for `DELETE /sessions/{session_id}/messages/{message_id}`.

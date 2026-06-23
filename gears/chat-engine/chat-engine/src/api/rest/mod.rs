@@ -129,12 +129,15 @@ where
         })
 }
 
-/// Build an `application/x-ndjson` response from an infallible
-/// `StreamingEvent` stream — the shape returned by the message / variant /
-/// summary services (`SendMessageStream`). Unlike [`ndjson_response`], items
-/// are SDK [`StreamingEvent`](chat_engine_sdk::models::StreamingEvent)s
-/// (mid-stream errors travel as `StreamingEvent::Error` lines, never as a
-/// `Result::Err`).
+/// Build a `text/event-stream` (Server-Sent Events) **delta** response from an
+/// infallible `StreamingEvent` stream — the shape returned by the message /
+/// variant services (`SendMessageStream`). The plugin's
+/// `Start`/`Chunk`/`Complete`/`Error` events are projected by
+/// [`DeltaProjector`](crate::domain::stream_delta::DeltaProjector) into the
+/// client-facing `start`/`delta`/`complete`/`error` protocol (FR-024); each
+/// wire event is emitted as one SSE frame (`id:` = `seq`, `event:` = type,
+/// `data:` = JSON). Mid-stream errors travel as an `error` event, never a
+/// `Result::Err`.
 ///
 /// The supplied `cancel` token fires when axum drops the response **body**
 /// (client disconnect / connection close), so the plugin-driver task tears
@@ -146,38 +149,54 @@ where
 /// before the body finishes streaming; parking the guard there would cancel
 /// the driver after the very first event. Tying it to the body's lifetime
 /// is the load-bearing detail.
-pub(crate) fn ndjson_stream_response(
+pub(crate) fn sse_delta_stream_response(
     stream: crate::domain::service::message_service::SendMessageStream,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Response {
+    use crate::domain::stream_delta::DeltaProjector;
+    use futures::stream;
+
     let guard = cancel.drop_guard();
-    let body_stream = stream.map(move |evt| {
-        // Owns `guard` for the body's lifetime; dropped (→ cancels the
-        // driver token) when the body completes or the client disconnects.
+    // Project the plugin event stream into wire delta events, threading the
+    // projector state through `scan`, then flatten the per-input batches.
+    let wire = stream
+        .scan(DeltaProjector::new(), |proj, evt| {
+            std::future::ready(Some(stream::iter(proj.project(evt))))
+        })
+        .flatten();
+
+    let body_stream = wire.map(move |w| {
+        // Owns `guard` for the body's lifetime; dropped (→ cancels the driver
+        // token) when the body completes or the client disconnects.
         let _keep = &guard;
-        let mut bytes = serde_json::to_vec(&evt).unwrap_or_else(|err| {
-            tracing::error!(error = %err, "failed to serialize StreamingEvent");
-            br#"{"type":"error","error":"internal serialization failure"}"#.to_vec()
-        });
-        bytes.push(b'\n');
-        std::result::Result::<_, Infallible>::Ok(bytes)
+        std::result::Result::<_, Infallible>::Ok(sse_frame(&w))
     });
 
     Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-ndjson"),
+            HeaderValue::from_static("text/event-stream"),
         )
         .header(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"))
         .header("x-accel-buffering", HeaderValue::from_static("no"))
         .body(Body::from_stream(body_stream))
         .unwrap_or_else(|err| {
-            tracing::error!(error = %err, "failed to build ndjson stream response");
+            tracing::error!(error = %err, "failed to build SSE stream response");
             let mut resp = Response::new(Body::empty());
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             resp
         })
+}
+
+/// Serialize one wire delta event into an SSE frame:
+/// `id: <seq>\nevent: <type>\ndata: <json>\n\n`.
+fn sse_frame(evt: &crate::domain::stream_delta::WireStreamEvent) -> Vec<u8> {
+    let data = serde_json::to_string(evt).unwrap_or_else(|err| {
+        tracing::error!(error = %err, "failed to serialize wire delta event");
+        r#"{"type":"error","error":"internal serialization failure"}"#.to_string()
+    });
+    format!("id: {}\nevent: {}\ndata: {}\n\n", evt.seq(), evt.event_name(), data).into_bytes()
 }
 
 fn serialize_event_or_fallback(evt: &StreamingEventDto) -> Vec<u8> {

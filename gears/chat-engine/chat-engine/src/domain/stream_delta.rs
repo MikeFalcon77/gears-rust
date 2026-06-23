@@ -111,14 +111,20 @@ pub struct DeltaProjector {
     text_opened: bool,
 }
 
+impl Default for DeltaProjector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeltaProjector {
-    /// Create a projector for `message_id` (the assistant message id Chat Engine
-    /// assigned — wire events are always stamped with it, regardless of the id
-    /// the plugin echoes).
+    /// Create a projector. The assistant `message_id` is captured from the
+    /// first `Start` event (the driver always emits `Start` first, stamped with
+    /// the id Chat Engine assigned); all subsequent wire events carry it.
     #[must_use]
-    pub fn new(message_id: Uuid) -> Self {
+    pub fn new() -> Self {
         Self {
-            message_id,
+            message_id: Uuid::nil(),
             next_seq: 0,
             text_opened: false,
         }
@@ -143,7 +149,10 @@ impl DeltaProjector {
     /// Project one plugin event into zero or more wire events.
     pub fn project(&mut self, event: StreamingEvent) -> Vec<WireStreamEvent> {
         match event {
-            StreamingEvent::Start(_) => {
+            StreamingEvent::Start(s) => {
+                // Capture the assistant id Chat Engine assigned; stamp all
+                // subsequent wire events with it.
+                self.message_id = s.message_id;
                 vec![WireStreamEvent::Start {
                     message_id: self.message_id,
                     seq: self.take_seq(),
@@ -217,10 +226,10 @@ mod tests {
 
     #[test]
     fn happy_path_projects_start_text_deltas_and_complete() {
-        let mut p = DeltaProjector::new(mid());
+        let mut p = DeltaProjector::new();
         let mut events = Vec::new();
         events.extend(p.project(StreamingEvent::Start(StreamingStartEvent {
-            message_id: Uuid::nil(),
+            message_id: mid(),
         })));
         events.extend(p.project(StreamingEvent::Chunk(StreamingChunkEvent {
             message_id: Uuid::nil(),
@@ -263,9 +272,9 @@ mod tests {
             "document_id": "doc-1", "document_name": "Doc", "index": 1
         }))
         .unwrap();
-        let mut p = DeltaProjector::new(mid());
+        let mut p = DeltaProjector::new();
         let _ = p.project(StreamingEvent::Start(StreamingStartEvent {
-            message_id: Uuid::nil(),
+            message_id: mid(),
         }));
         let _ = p.project(StreamingEvent::Chunk(StreamingChunkEvent {
             message_id: Uuid::nil(),
@@ -283,7 +292,7 @@ mod tests {
 
     #[test]
     fn error_projects_single_terminal_error() {
-        let mut p = DeltaProjector::new(mid());
+        let mut p = DeltaProjector::new();
         let out = p.project(StreamingEvent::Error(StreamingErrorEvent {
             message_id: Uuid::nil(),
             error: "boom".into(),

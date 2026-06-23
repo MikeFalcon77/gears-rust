@@ -329,7 +329,7 @@ pub fn register_routes(
         .json_response_with_schema::<StreamingEventDto>(
             openapi,
             StatusCode::OK,
-            "NDJSON stream of StreamingEventDto (application/x-ndjson)",
+            "SSE delta stream of start/delta/complete/error events (text/event-stream)",
         )
         .standard_errors(openapi)
         .register(router, openapi);
@@ -350,7 +350,7 @@ pub fn register_routes(
         .json_response_with_schema::<StreamingEventDto>(
             openapi,
             StatusCode::OK,
-            "NDJSON stream of StreamingEventDto (application/x-ndjson)",
+            "SSE delta stream of start/delta/complete/error events (text/event-stream)",
         )
         .standard_errors(openapi)
         .register(router, openapi);
@@ -409,7 +409,7 @@ pub fn register_routes(
         .json_response_with_schema::<StreamingEventDto>(
             openapi,
             StatusCode::OK,
-            "NDJSON stream of StreamingEventDto (application/x-ndjson)",
+            "SSE delta stream of start/delta/complete/error events (text/event-stream)",
         )
         .standard_errors(openapi)
         .register(router, openapi);
