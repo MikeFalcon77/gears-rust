@@ -10,16 +10,16 @@ Task-oriented guides for the things you do while building a gear. Each is ground
 real framework source and the `users-info` / `calculator` examples; where the source is thin,
 the guide says so and links to the example.
 
-- **[Database patterns](/guides/database/)** — secure, tenant-scoped persistence with
+- **[Database patterns](./database/)** — secure, tenant-scoped persistence with
   `SecureConn`, `#[derive(Scopable)]`, transactions, and migrations.
-- **[Authorization](/guides/authorization/)** — the PDP/PEP flow: `PolicyEnforcer`,
+- **[Authorization](./authorization/)** — the PDP/PEP flow: `PolicyEnforcer`,
   `AccessScope`, constraint predicates, and route-level auth.
-- **[Pagination & filtering](/guides/odata/)** — OData `$filter` / `$orderby` / `$select`
+- **[Pagination & filtering](./odata/)** — OData `$filter` / `$orderby` / `$select`
   and cursor-based pages.
-- **[Out-of-process gears](/guides/out-of-process/)** — run a gear as a separate gRPC
+- **[Out-of-process gears](./out-of-process/)** — run a gear as a separate gRPC
   service behind the same SDK, selected by configuration.
-- **[Observability](/guides/observability/)** — OpenTelemetry tracing, request IDs, health
+- **[Observability](./observability/)** — OpenTelemetry tracing, request IDs, health
   endpoints, and instrumented HTTP clients.
 
-New here? Start with the [first-gear walkthrough](/get-started/your-first-gear/), which uses
+New here? Start with the [first-gear walkthrough](../get-started/your-first-gear/), which uses
 all of these together.

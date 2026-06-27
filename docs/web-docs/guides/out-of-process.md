@@ -131,5 +131,5 @@ orchestrator; custom discovery backends are an advanced topic the example doesn'
 
 ## See also
 
-- [Gears & composition](/concepts/gears-and-composition/) — in-process vs out-of-process.
+- [Gears & composition](../../concepts/gears-and-composition/) — in-process vs out-of-process.
 - Full code: `examples/oop-gears/calculator/`.

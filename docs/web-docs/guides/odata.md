@@ -101,5 +101,5 @@ then projected. Keep that in mind for very wide rows.
 
 ## See also
 
-- [Database patterns](/guides/database/) — the scoped base query `paginate_odata` runs over.
+- [Database patterns](../database/) — the scoped base query `paginate_odata` runs over.
 - Full code: the `odata/` module in `users-info-sdk` and `odata_mapper.rs` in the gear.

@@ -7,7 +7,7 @@ sidebar:
 ---
 
 This is how a Gears system is organized end to end. It expands on the
-[core concepts](/concepts/) with the runtime lifecycle, the request path, and the
+[core concepts](../concepts/) with the runtime lifecycle, the request path, and the
 deployment model.
 
 ## Three tiers, one-way dependencies

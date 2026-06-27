@@ -53,7 +53,7 @@ The dev server runs at `http://localhost:4321`.
 
 :::note
 Full-text search is disabled in `dev`. Run `pnpm build && pnpm preview` to exercise
-search and the production output (including the [/i18n/](/i18n/) dashboard).
+search and the production output (including the [/i18n/](../../i18n/) dashboard).
 :::
 
 ## Git workflow

@@ -327,6 +327,7 @@ gts-docs:
 		--vendor cf,vendor,example,fabrikam \
 		--exclude "target/*" \
 		--exclude "docs/api/*" \
+		--exclude "docs/web-docs/*" \
 		--exclude "gears/chat-engine/*" \
 		--exclude "**/helm/*/templates/*" \
 		docs gears libs examples

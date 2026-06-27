@@ -7,12 +7,12 @@ sidebar:
 ---
 
 The Gears docs are localizable. Translations live alongside the English source,
-and a [status dashboard](/i18n/) tracks what's done, outdated, or missing per
+and a [status dashboard](../../i18n/) tracks what's done, outdated, or missing per
 language.
 
 ## The translation dashboard
 
-Visit **[/i18n/](/i18n/)** to see overall progress for each language. Pages are
+Visit **[/i18n/](../../i18n/)** to see overall progress for each language. Pages are
 marked:
 
 - ✅ **Done** — translated and up to date.
@@ -36,8 +36,7 @@ Adding a language is two small edits plus a content directory:
    ```js
    locales: {
      root: { label: 'English', lang: 'en' },
-     ru: { label: 'Русский', lang: 'ru' },
-     de: { label: 'Deutsch', lang: 'de' }, // new
+     de: { label: 'Deutsch', lang: 'de' } // new
    }
    ```
 
@@ -73,14 +72,14 @@ them.
 
 ## Translating a page
 
-1. Open the [dashboard](/i18n/) and pick a **Missing** or **Outdated** page.
+1. Open the [dashboard](../../i18n/) and pick a **Missing** or **Outdated** page.
 2. Copy the English source to the matching path under your language directory.
 3. Translate the body. **Keep unchanged:**
    - frontmatter **keys** (translate only the `title`/`description` **values**),
    - code blocks and command output,
    - internal link targets (the path stays the same).
 4. Run `pnpm dev` and visit the localized URL (e.g. `/ru/concepts/runtime-and-lifecycle/`).
-5. Open a pull request following the [contributor guide](/contributing/contributor-guide/).
+5. Open a pull request following the [contributor guide](../contributor-guide/).
 
 :::tip
 Prioritize quality over volume. A small set of accurate, well-reviewed pages is

@@ -41,11 +41,11 @@ hero:
       </svg>
   actions:
     - text: Get started
-      link: /get-started/
+      link: ./get-started/
       icon: right-arrow
       variant: primary
     - text: Core concepts
-      link: /concepts/
+      link: ./concepts/
       icon: open-book
       variant: minimal
 ---
@@ -55,18 +55,18 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 <CardGrid>
   <Card title="Build a gear" icon="puzzle">
     Define an SDK, implement a domain service, and wire it into the runtime.
-    See [Getting Started](/get-started/).
+    See [Getting Started](./get-started/).
   </Card>
   <Card title="Runtime model" icon="setting">
     Ordered lifecycle phases, explicit dependencies, one runtime across many
-    deployment shapes. See [Concepts](/concepts/).
+    deployment shapes. See [Concepts](./concepts/).
   </Card>
   <Card title="Architecture" icon="seti:default">
     The three-tier gear hierarchy, gateway, and safety contracts.
-    See [Architecture](/architecture/).
+    See [Architecture](./architecture/).
   </Card>
   <Card title="Reference" icon="open-book">
     Crates, gears, traits, configuration, and the canonical error model.
-    See [Reference](/reference/).
+    See [Reference](./reference/).
   </Card>
 </CardGrid>

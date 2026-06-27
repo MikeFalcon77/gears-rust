@@ -7,7 +7,7 @@ sidebar:
 ---
 
 This page gets the example server running so you have something to explore and call.
-When you're ready to write code, continue to [Build your first gear](/get-started/your-first-gear/).
+When you're ready to write code, continue to [Build your first gear](./your-first-gear/).
 
 ## Prerequisites
 
@@ -83,6 +83,6 @@ pkill -f cf-gears-server
 
 ## Next
 
-- [Build your first gear](/get-started/your-first-gear/) — write an SDK, a domain service,
+- [Build your first gear](./your-first-gear/) — write an SDK, a domain service,
   and a REST endpoint, and wire it into the runtime.
-- [Core concepts](/concepts/) — the mental model behind what you just ran.
+- [Core concepts](../concepts/) — the mental model behind what you just ran.

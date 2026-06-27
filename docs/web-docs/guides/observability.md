@@ -91,6 +91,6 @@ full; the exact init entry point is part of the bootstrap, not something gears c
 
 ## See also
 
-- [Runtime & lifecycle](/concepts/runtime-and-lifecycle/) — where background work and
+- [Runtime & lifecycle](../../concepts/runtime-and-lifecycle/) — where background work and
   cancellation fit.
 - Full reference: `docs/TRACING_SETUP.md` in the framework repository.

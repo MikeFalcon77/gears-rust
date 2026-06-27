@@ -70,7 +70,7 @@ the workspace lints. Always go through `SecureConn` with a scope obtained from t
 `PolicyEnforcer`.
 :::
 
-The [authorization guide](/guides/authorization/) and [database guide](/guides/database/)
+The [authorization guide](../../guides/authorization/) and [database guide](../../guides/database/)
 show the full flow against real code.
 
 ## Multi-tenancy

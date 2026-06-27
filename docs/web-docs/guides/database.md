@@ -7,7 +7,7 @@ sidebar:
 ---
 
 Gears never touch a raw database connection. All access flows through the secure ORM layer
-(`toolkit-db`), which applies an [`AccessScope`](/concepts/security-and-tenancy/) to every
+(`toolkit-db`), which applies an [`AccessScope`](../../concepts/security-and-tenancy/) to every
 query as automatic `WHERE` clauses. This guide shows the patterns you'll use day to day.
 
 ## Make an entity scopable
@@ -70,7 +70,7 @@ async fn delete<C: DBRunner>(&self, conn: &C, scope: &AccessScope, id: Uuid)
 ```
 
 The scope is obtained from the `PolicyEnforcer` in the domain service and passed down — see
-[Authorization](/guides/authorization/). An empty scope matches **no rows**
+[Authorization](../authorization/). An empty scope matches **no rows**
 (deny-by-default), and `tenant_id` is immutable on update.
 
 ## Acquire a connection
@@ -134,7 +134,7 @@ backend-aware SQL via `manager.get_connection().execute_unprepared(...)`).
 
 ## See also
 
-- [Security & multi-tenancy](/concepts/security-and-tenancy/) — where the scope comes from.
-- [Authorization](/guides/authorization/) — obtaining an `AccessScope`.
-- [Pagination & filtering](/guides/odata/) — `paginate_odata` over a scoped query.
+- [Security & multi-tenancy](../../concepts/security-and-tenancy/) — where the scope comes from.
+- [Authorization](../authorization/) — obtaining an `AccessScope`.
+- [Pagination & filtering](../odata/) — `paginate_odata` over a scoped query.
 - Full code: `examples/toolkit/users-info/users-info/src/infra/storage/`.

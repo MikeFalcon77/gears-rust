@@ -125,6 +125,6 @@ DomainError::Forbidden =>
 
 ## See also
 
-- [Security & multi-tenancy](/concepts/security-and-tenancy/) — the model behind this flow.
-- [Database patterns](/guides/database/) — how the `AccessScope` becomes SQL.
+- [Security & multi-tenancy](../../concepts/security-and-tenancy/) — the model behind this flow.
+- [Database patterns](../database/) — how the `AccessScope` becomes SQL.
 - Full code: `examples/toolkit/users-info/users-info/src/domain/service/`.

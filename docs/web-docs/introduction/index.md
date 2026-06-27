@@ -48,7 +48,7 @@ Gears ships a substantial substrate so you build features, not plumbing:
 - **Out-of-process gears** over gRPC, selected by configuration — no code changes.
 - **FIPS 140-3-ready** crypto on Linux, macOS, and Windows.
 
-See [Components & features](/reference/) for the full catalog of toolkit libraries
+See [Components & features](../reference/) for the full catalog of toolkit libraries
 and ready-made system gears.
 
 ## One codebase, three deployment shapes
@@ -76,10 +76,10 @@ over quick-start minimalism. From the framework's own non-goals:
 
 A typical path from reading to a running application:
 
-1. [Install the toolchain and run the example server](/get-started/).
-2. [Build your first gear](/get-started/your-first-gear/) — an SDK, a domain service,
+1. [Install the toolchain and run the example server](../get-started/).
+2. [Build your first gear](../get-started/your-first-gear/) — an SDK, a domain service,
    a REST endpoint, wired into the runtime.
-3. Learn the [core concepts](/concepts/) — gears, the SDK pattern, `ClientHub`, the
+3. Learn the [core concepts](../concepts/) — gears, the SDK pattern, `ClientHub`, the
    security model.
-4. Reach for [ready-made components & features](/reference/) as you need them.
-5. Understand [how the system is organized](/architecture/) when you scale up.
+4. Reach for [ready-made components & features](../reference/) as you need them.
+5. Understand [how the system is organized](../architecture/) when you scale up.
