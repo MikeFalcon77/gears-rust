@@ -26,6 +26,7 @@ use crate::domain::multipart::MultipartUploadSession;
 use crate::domain::policy::RetentionScope;
 use crate::domain::ports::CleanupStore;
 use crate::infra::backend::BackendRegistry;
+use crate::infra::external_clients::{UsageDelta, UsageReporter};
 
 /// Page size for the keyset-paginated retention file scan. Bounds how many
 /// `File` rows the sweep holds in memory at once, independent of total count.
@@ -72,6 +73,10 @@ pub struct CleanupEngine {
     store: Arc<dyn CleanupStore>,
     backends: BackendRegistry,
     config: CleanupConfig,
+    /// Usage-reporting sink (P2 1.12 remediation). `None` disables reporting
+    /// (fire-and-forget no-op); `gear.rs` opts in via
+    /// [`Self::with_usage_reporter`] once a Usage Collector client is wired.
+    usage_reporter: Option<Arc<dyn UsageReporter>>,
 }
 
 impl CleanupEngine {
@@ -86,6 +91,29 @@ impl CleanupEngine {
             store,
             backends,
             config,
+            usage_reporter: None,
+        }
+    }
+
+    /// Install a usage-reporting sink (P2 1.12 remediation). Kept as a
+    /// builder step (mirroring `FileService`/`MultipartService`'s
+    /// `with_metrics`/`with_usage_reporter`) so existing `CleanupEngine::new(...)`
+    /// call sites across the test suite keep compiling unchanged.
+    #[must_use]
+    pub fn with_usage_reporter(mut self, usage_reporter: Option<Arc<dyn UsageReporter>>) -> Self {
+        self.usage_reporter = usage_reporter;
+        self
+    }
+
+    /// Fire-and-forget usage delta report. Failures are logged but never
+    /// propagated -- a failing usage reporter must not block the sweep.
+    ///
+    /// @cpt-cf-file-storage-fr-usage-reporting
+    fn report_usage(&self, delta: UsageDelta) {
+        if let Some(reporter) = self.usage_reporter.clone() {
+            tokio::spawn(async move {
+                reporter.report(delta).await;
+            });
         }
     }
 
@@ -174,6 +202,7 @@ impl CleanupEngine {
                 .delete_abandoned_pending_version(
                     v.file_id,
                     v.version_id,
+                    v.size,
                     &v.backend_id,
                     &v.backend_path,
                 )
@@ -189,12 +218,20 @@ impl CleanupEngine {
     /// `content_id` -- delete the now-permanently-orphaned `files` row too
     /// (P2 2.8).
     ///
+    /// `size` is the pending version's `file_versions.size` -- structurally
+    /// `0` in practice, since a version is only ever assigned a nonzero size
+    /// by `finalize_version`, and a version reclaimed here never reached
+    /// that call. It is still read back and reported (rather than a
+    /// hardcoded `0`) so this debit stays correct even if that invariant
+    /// ever changes.
+    ///
     /// Returns `(pending_versions_deleted, orphan_files_deleted)`, each `0`
     /// or `1`.
     async fn delete_abandoned_pending_version(
         &self,
         file_id: Uuid,
         version_id: Uuid,
+        size: i64,
         backend_id: &str,
         backend_path: &str,
     ) -> (usize, usize) {
@@ -213,6 +250,22 @@ impl CleanupEngine {
         };
         match self.store.delete_version(file_id, version_id, audit).await {
             Ok(true) => {
+                // @cpt-cf-file-storage-fr-usage-reporting
+                // Debit the pending version's bytes; `file_count_delta` is
+                // `0` because only the version row is gone here, not the
+                // parent file (that follow-on debit, if any, is reported
+                // separately by `maybe_delete_orphaned_file` below).
+                // Best-effort: a failed file lookup just skips the (usually
+                // zero-magnitude) report rather than blocking reclamation.
+                if let Ok(Some(file)) = self.store.get_file(file_id).await {
+                    self.report_usage(UsageDelta {
+                        tenant_id: file.tenant_id,
+                        owner_id: file.owner_id,
+                        bytes_delta: -size,
+                        file_count_delta: 0,
+                    });
+                }
+
                 // Best-effort blob cleanup -- a failure here leaves an unreachable
                 // orphan blob which is acceptable in P2.
                 self.best_effort_delete(backend_id, backend_path).await;
@@ -278,7 +331,22 @@ impl CleanupEngine {
             .delete_orphan_file_with_event(file_id, audit, event)
             .await
         {
-            Ok(true) => 1,
+            Ok(true) => {
+                // @cpt-cf-file-storage-fr-usage-reporting
+                // The file itself was credited `+1` at `create_file` time and
+                // never got any bytes credited (its only version(s) were
+                // reclaimed as abandoned pending, never finalized) -- debit
+                // the file count only; `bytes_delta` is `0` because this is,
+                // by construction, a zero-version file (see
+                // `orphan_candidate_file`).
+                self.report_usage(UsageDelta {
+                    tenant_id: file.tenant_id,
+                    owner_id: file.owner_id,
+                    bytes_delta: 0,
+                    file_count_delta: -1,
+                });
+                1
+            }
             Ok(false) => {
                 // Guard failed inside the transaction (a version now exists
                 // / is bound) or a concurrent sweep already removed it --
@@ -707,6 +775,19 @@ impl CleanupEngine {
             .await
         {
             Ok(true) => {
+                // @cpt-cf-file-storage-fr-usage-reporting
+                // Debit the file's total bytes and the file count -- a
+                // retention-expired delete removes the whole file (mirrors
+                // `FileService::delete_file_inner`'s debit for the
+                // user-initiated path).
+                let total_bytes: i64 = versions.iter().map(|v| v.size).sum();
+                self.report_usage(UsageDelta {
+                    tenant_id: file.tenant_id,
+                    owner_id: file.owner_id,
+                    bytes_delta: -total_bytes,
+                    file_count_delta: -1,
+                });
+
                 for v in &versions {
                     self.best_effort_delete(&v.backend_id, &v.backend_path)
                         .await;

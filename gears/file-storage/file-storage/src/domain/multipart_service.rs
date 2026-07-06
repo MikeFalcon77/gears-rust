@@ -32,7 +32,7 @@ use crate::domain::multipart::{
 use crate::domain::policy::{PolicyResolver, PolicyScope};
 use crate::domain::ports::{FileStorageMetricsPort, MultipartStore};
 use crate::infra::backend::BackendRegistry;
-use crate::infra::external_clients::{QuotaClient, QuotaDecision};
+use crate::infra::external_clients::{QuotaClient, QuotaDecision, UsageDelta, UsageReporter};
 use crate::infra::metrics::NoopMetrics;
 use crate::infra::signed_url::{Claims, Issuer, MultipartClaims, Op, UploadConstraints};
 
@@ -61,6 +61,10 @@ pub struct MultipartService {
     /// (see [`Self::new`]); `gear.rs` opts into the real OTel-backed meter via
     /// [`Self::with_metrics`].
     metrics: Arc<dyn FileStorageMetricsPort>,
+    /// Usage-reporting sink (P2 1.12 remediation). `None` disables reporting
+    /// (fire-and-forget no-op); `gear.rs` opts in via
+    /// [`Self::with_usage_reporter`] once a Usage Collector client is wired.
+    usage_reporter: Option<Arc<dyn UsageReporter>>,
 }
 
 impl MultipartService {
@@ -82,6 +86,7 @@ impl MultipartService {
             sidecar_base_url,
             url_ttl_secs,
             metrics: Arc::new(NoopMetrics),
+            usage_reporter: None,
         }
     }
 
@@ -93,6 +98,30 @@ impl MultipartService {
     pub fn with_metrics(mut self, metrics: Arc<dyn FileStorageMetricsPort>) -> Self {
         self.metrics = metrics;
         self
+    }
+
+    /// Install a usage-reporting sink (P2 1.12 remediation). Same builder
+    /// shape as [`Self::with_metrics`] -- existing `MultipartService::new(...)`
+    /// call sites keep compiling unchanged.
+    #[must_use]
+    pub fn with_usage_reporter(mut self, usage_reporter: Option<Arc<dyn UsageReporter>>) -> Self {
+        self.usage_reporter = usage_reporter;
+        self
+    }
+
+    /// Fire-and-forget usage delta report. Failures are logged but never
+    /// propagated -- a failing usage reporter must not block file operations.
+    ///
+    /// Mirrors `FileService::report_usage` (kept private/independent per this
+    /// service's fan-in-isolation design -- see the module doc).
+    ///
+    /// @cpt-cf-file-storage-fr-usage-reporting
+    fn report_usage(&self, delta: UsageDelta) {
+        if let Some(reporter) = self.usage_reporter.clone() {
+            tokio::spawn(async move {
+                reporter.report(delta).await;
+            });
+        }
     }
 
     // ── private helpers ──────────────────────────────────────────────────────
@@ -691,6 +720,20 @@ impl MultipartService {
                 session.state.as_str(),
             ));
         }
+
+        // @cpt-cf-file-storage-fr-usage-reporting
+        // Credit the assembled object's total bytes. Multipart finalize does
+        // not go through `FileService::finalize_upload`, so it needs its own
+        // credit call; `file_count_delta` is `0` because the file itself was
+        // already reported `+1` at `create_file` time (multipart uploads
+        // always target an existing file -- `initiate_multipart_upload`
+        // requires `file_id` to already resolve via `require_file`).
+        self.report_usage(UsageDelta {
+            tenant_id: file.tenant_id,
+            owner_id: file.owner_id,
+            bytes_delta: total_size,
+            file_count_delta: 0,
+        });
 
         self.metrics
             .record_operation("complete_multipart_upload", "ok");

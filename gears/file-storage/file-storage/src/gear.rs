@@ -144,7 +144,24 @@ impl Gear for FileStorageGear {
 
         // TODO(P2): wire the quota-enforcement client once the Quota Enforcement
         // gear exposes an SDK crate. For now, no quota checks are performed.
-        // TODO(P2-M5): wire the usage reporter once a Usage Collector SDK is available.
+        //
+        // TODO(P2 1.12 remediation): wire the usage reporter off `None`.
+        // `usage-collector-sdk`'s `UsageCollectorClientV1` (resolved the same
+        // way `authz_resolver_sdk::AuthZResolverClient` is resolved just
+        // above) is mechanically reachable via `ctx.client_hub().get::<...>()`,
+        // but an adapter from this gear's simple `UsageDelta{bytes_delta,
+        // file_count_delta}` shape to the collector's actual wire model is a
+        // non-trivial design decision, not a mechanical wiring step:
+        // `UsageRecord` requires a registered `UsageTypeGtsId` (a `create_usage_type`
+        // call this gear would need to own/idempotently ensure), a per-call
+        // `idempotency_key`, a `resource_ref`, and -- critically -- negative
+        // deltas are modeled as *compensations* (`corrects_id` pointing back
+        // at the specific prior credit record's `uuid`), which this gear does
+        // not currently track anywhere. Emitting bare negative-value counter
+        // rows without that lineage would violate the collector's L1
+        // referential rule. Symmetry of the deltas themselves (this
+        // remediation's actual bug) is fixed below and is independent of this
+        // follow-up.
         let service = Arc::new(
             FileService::new(
                 store,
@@ -153,7 +170,7 @@ impl Gear for FileStorageGear {
                 Arc::clone(&authorizer),
                 svc_cfg,
                 None, // quota_client
-                None, // usage_reporter
+                None, // usage_reporter -- see TODO above
             )
             .with_metrics(Arc::clone(&metrics)),
         );
@@ -171,7 +188,8 @@ impl Gear for FileStorageGear {
                 sidecar_base_url,
                 url_ttl_secs,
             )
-            .with_metrics(Arc::clone(&metrics)),
+            .with_metrics(Arc::clone(&metrics))
+            .with_usage_reporter(None), // see TODO above `service`
         );
         self.multipart_service.set(multipart_svc).map_err(|_| {
             anyhow::anyhow!(
@@ -190,13 +208,16 @@ impl Gear for FileStorageGear {
         // set `enable_background_sweep = false`).
         if cfg.enable_background_sweep {
             let sweep_secs = cfg.sweep_interval_secs;
-            let engine = Arc::new(CleanupEngine::new(
-                sweep_store,
-                sweep_backends,
-                CleanupConfig {
-                    orphan_grace_secs: cfg.orphan_grace_secs,
-                },
-            ));
+            let engine = Arc::new(
+                CleanupEngine::new(
+                    sweep_store,
+                    sweep_backends,
+                    CleanupConfig {
+                        orphan_grace_secs: cfg.orphan_grace_secs,
+                    },
+                )
+                .with_usage_reporter(None), // see TODO above `service`
+            );
             let sweep_metrics = Arc::clone(&metrics);
             tokio::spawn(async move {
                 let interval = tokio::time::Duration::from_secs(sweep_secs);

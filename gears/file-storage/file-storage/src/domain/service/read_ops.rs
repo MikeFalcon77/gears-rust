@@ -348,6 +348,18 @@ impl FileService {
                 None => DomainError::version_not_found(file_id, version_id),
             });
         }
+        // @cpt-cf-file-storage-fr-usage-reporting
+        // Debit this non-current version's bytes. The `all.len() <= 1` branch
+        // above already delegated to `delete_file_inner` (which reports its
+        // own whole-file debit), so this arm only runs when at least one
+        // other version remains -- no double-count with that path.
+        self.report_usage(UsageDelta {
+            tenant_id: file.tenant_id,
+            owner_id: file.owner_id,
+            bytes_delta: -version.size,
+            file_count_delta: 0,
+        });
+
         self.best_effort_blob_delete(&version.backend_id, &version.backend_path)
             .await;
         self.metrics.record_operation("delete_version", "ok");

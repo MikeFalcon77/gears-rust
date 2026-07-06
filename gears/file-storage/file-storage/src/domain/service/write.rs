@@ -227,6 +227,20 @@ impl FileService {
                 },
             );
         }
+
+        // @cpt-cf-file-storage-fr-usage-reporting
+        // Credit the read-back-derived bytes now that the version is durably
+        // finalized. `create_file` already reported `+1 file` with `0 bytes`
+        // (bytes are unknown at creation time), so `file_count_delta` here is
+        // `0` -- this is the byte-crediting complement that makes the total
+        // symmetric with the debit at `delete_file_inner`/`delete_version`.
+        self.report_usage(UsageDelta {
+            tenant_id: file.tenant_id,
+            owner_id: file.owner_id,
+            bytes_delta: actual_size,
+            file_count_delta: 0,
+        });
+
         self.metrics.record_operation("finalize_upload", "ok");
         Ok(())
     }
@@ -705,6 +719,17 @@ impl FileService {
                 },
             );
         }
+
+        // @cpt-cf-file-storage-fr-usage-reporting
+        // Same byte-crediting complement as `finalize_upload` (see its
+        // comment) for the sidecar-callback / token-authenticated path.
+        self.report_usage(UsageDelta {
+            tenant_id: file.tenant_id,
+            owner_id: file.owner_id,
+            bytes_delta: actual_size,
+            file_count_delta: 0,
+        });
+
         self.metrics
             .record_operation("finalize_upload_by_token", "ok");
         Ok(())
