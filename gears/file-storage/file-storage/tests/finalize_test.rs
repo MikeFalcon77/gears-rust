@@ -544,3 +544,51 @@ async fn finalize_persists_validated_mime() {
         "stored mime_type must be the sniffed canonical type, not the declared string verbatim"
     );
 }
+
+// -- 10. finalize_upload: read-back streams a large object correctly --------
+// (CodeRabbit follow-up — finalize's read-back must verify size/hash by
+// streaming the object rather than buffering it whole; this exercises that
+// path end-to-end with an object well beyond a single small chunk and
+// asserts the persisted size/hash are exactly the ones an incremental
+// SHA-256 over the real bytes would produce)
+
+#[tokio::test]
+async fn finalize_streams_readback_without_buffering_whole_blob() {
+    let (svc, backend, store) = build_service().await;
+    let ctx = ctx(Uuid::now_v7());
+    let ticket = svc.create_file(&ctx, new_file(), None).await.unwrap();
+
+    // 4 MiB of non-trivial (non-all-zero) content — large enough that a
+    // regression back to whole-blob buffering would still "work" here, but a
+    // streaming implementation must produce the exact same size/hash as an
+    // incremental hash over the same bytes.
+    let large_bytes: Vec<u8> = (0..4 * 1024 * 1024)
+        .map(|i| u8::try_from(i % 251).unwrap())
+        .collect();
+    let large_bytes = Bytes::from(large_bytes);
+
+    let path = backend_path(ticket.file_id, ticket.version_id);
+    backend.put(&path, large_bytes.clone()).await.unwrap();
+
+    let true_size = i64::try_from(large_bytes.len()).unwrap();
+    let true_hash = hash::sha256(&large_bytes);
+
+    svc.finalize_upload(
+        &ctx,
+        ticket.file_id,
+        ticket.version_id,
+        true_size,
+        true_hash.clone(),
+    )
+    .await
+    .unwrap();
+
+    let version = store
+        .get_version(ticket.file_id, ticket.version_id)
+        .await
+        .unwrap()
+        .expect("version row must exist");
+    assert_eq!(version.status, VersionStatus::Available);
+    assert_eq!(version.size, true_size);
+    assert_eq!(version.hash_value, true_hash);
+}

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use futures::StreamExt;
 use time::OffsetDateTime;
 use toolkit_security::{AccessScope, SecurityContext};
 use uuid::Uuid;
@@ -14,10 +15,10 @@ use crate::domain::error::DomainError;
 use crate::domain::etag;
 use crate::domain::policy::PolicyResolver;
 use crate::domain::service::{FileService, VersionRef};
-use crate::infra::content::mime;
+use crate::infra::backend::StorageBackend;
+use crate::infra::content::{hash, mime};
 use crate::infra::external_clients::UsageDelta;
 use crate::infra::signed_url::{Claims, Op, UploadConstraints};
-use crate::infra::storage::Store;
 
 /// Validate the read-back blob's actual bytes against the version's declared
 /// MIME type, reusing [`mime::validate`]'s magic-byte sniffing (the same logic
@@ -71,6 +72,64 @@ fn enforce_size_ceiling_for_validated_mime(
         ));
     }
     Ok(())
+}
+
+/// Cap on how many leading bytes of the read-back blob are captured for MIME
+/// sniffing (`cpt-cf-file-storage-fr-content-type-validation`). The vendored
+/// `infer` crate's deepest matcher (a legacy RAR-archive signature) inspects
+/// byte offset 261; every other matcher looks at far fewer bytes. 8 KiB is
+/// comfortably more than any matcher needs, so truncating the read-back to
+/// this prefix can never change a sniff result.
+const MIME_SNIFF_PREFIX_BYTES: usize = 8 * 1024;
+
+/// Read back the blob actually stored at `backend_path` on `backend`,
+/// streaming it chunk by chunk rather than buffering the whole object in
+/// memory (`cpt-cf-file-storage-fr-backend-abstraction`, memory-safety fix:
+/// finalize's read-back is the mirror image of `put_stream`'s streaming write
+/// and must be equally memory-bounded, not defeat it by buffering the whole
+/// object back in on the read side). Computes the actual byte count and
+/// SHA-256 digest incrementally via [`hash::Hasher`], while also capturing up
+/// to [`MIME_SNIFF_PREFIX_BYTES`] of the leading bytes for
+/// [`mime::validate`]'s magic-byte sniffing (which only ever inspects a small
+/// bounded prefix — see that constant's doc comment).
+///
+/// A missing object (no prior successful PUT) or any failure while reading
+/// its body back surfaces as the same `DomainError::validation("content",
+/// ...)` finalize has always used for this case — callers cannot distinguish
+/// "never uploaded" from "upload started but the object is now unreadable",
+/// and both are equally reasons to reject the finalize.
+///
+/// Returns `(actual_size, actual_hash, mime_sniff_prefix)`.
+async fn read_back_and_hash_streaming(
+    backend: &dyn StorageBackend,
+    backend_path: &str,
+) -> Result<(i64, Vec<u8>, Vec<u8>), DomainError> {
+    let no_content_err = || {
+        DomainError::validation(
+            "content",
+            "no uploaded content found at the backend path; PUT was not completed",
+        )
+    };
+
+    let mut stream = backend
+        .get_stream(backend_path)
+        .await
+        .map_err(|_| no_content_err())?;
+
+    let mut hasher = hash::Hasher::new();
+    let mut prefix: Vec<u8> = Vec::with_capacity(MIME_SNIFF_PREFIX_BYTES);
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| no_content_err())?;
+        if prefix.len() < MIME_SNIFF_PREFIX_BYTES {
+            let take = (MIME_SNIFF_PREFIX_BYTES - prefix.len()).min(chunk.len());
+            prefix.extend_from_slice(&chunk[..take]);
+        }
+        hasher.update(&chunk);
+    }
+
+    let actual_size = i64::try_from(hasher.len()).unwrap_or(i64::MAX);
+    let actual_hash = hasher.finalize();
+    Ok((actual_size, actual_hash, prefix))
 }
 
 impl FileService {
@@ -151,41 +210,38 @@ impl FileService {
             ));
         }
 
-        // Never trust the caller's claimed size/hash: read the blob actually
-        // present at the version's backend path and recompute both from the
-        // real bytes. A finalize with no prior successful PUT (no object at
-        // that path) or a forged size/hash claim is rejected here rather than
-        // silently persisted.
-        let blob = backend.get(&version.backend_path).await.map_err(|_| {
-            DomainError::validation(
-                "content",
-                "no uploaded content found at the backend path; PUT was not completed",
-            )
-        })?;
-        let actual_size = i64::try_from(blob.len()).unwrap_or(i64::MAX);
+        // Never trust the caller's claimed size/hash: stream the blob
+        // actually present at the version's backend path and recompute both
+        // from the real bytes, never buffering more than one chunk (plus a
+        // small MIME-sniff prefix) in memory regardless of object size. A
+        // finalize with no prior successful PUT (no object at that path) or a
+        // forged size/hash claim is rejected here rather than silently
+        // persisted.
+        let (actual_size, actual_hash, mime_sniff_prefix) =
+            read_back_and_hash_streaming(backend.as_ref(), &version.backend_path).await?;
         if actual_size != size {
             return Err(DomainError::validation(
                 "size",
                 "claimed size does not match the uploaded content",
             ));
         }
-        Store::verify_content_hash(&blob, &hash_value)?;
-        // `verify_content_hash` already computed `sha256(blob)` internally and
-        // only returns `Ok` when it is byte-for-byte equal to `hash_value` —
-        // recomputing `hash::sha256(&blob)` here a second time would
-        // deterministically yield that exact same value again, so persist the
-        // already-verified `hash_value` instead of paying for a second
-        // full-blob hash pass (CodeRabbit nitpick).
-        let actual_hash = hash_value;
+        if actual_hash != hash_value {
+            return Err(DomainError::hash_mismatch(
+                hex::encode(&hash_value),
+                hex::encode(&actual_hash),
+            ));
+        }
 
         // Declared MIME type is never trustworthy either: validate the
         // read-back blob's real bytes against `version_mime` (reusing the
         // same magic-byte sniffing the in-process data plane runs at
-        // ingress), rejecting a mismatch before anything is finalized. The
+        // ingress), rejecting a mismatch before anything is finalized. Only
+        // the leading `MIME_SNIFF_PREFIX_BYTES` are needed — see that
+        // constant's doc comment for why that is always sufficient. The
         // returned type is the sniffed/canonical one when the bytes carry a
         // recognizable signature, otherwise the declared type unchanged.
         // @cpt-cf-file-storage-fr-content-type-validation
-        let validated_mime = validate_and_resolve_mime(&version_mime, &blob)?;
+        let validated_mime = validate_and_resolve_mime(&version_mime, &mime_sniff_prefix)?;
         enforce_size_ceiling_for_validated_mime(
             &policy,
             &version_mime,
@@ -639,41 +695,38 @@ impl FileService {
             ));
         }
 
-        // Never trust the caller's claimed size/hash: read the blob actually
-        // present at the version's backend path and recompute both from the
-        // real bytes. A finalize with no prior successful PUT (no object at
-        // that path) or a forged size/hash claim is rejected here rather than
-        // silently persisted.
-        let blob = backend.get(&version.backend_path).await.map_err(|_| {
-            DomainError::validation(
-                "content",
-                "no uploaded content found at the backend path; PUT was not completed",
-            )
-        })?;
-        let actual_size = i64::try_from(blob.len()).unwrap_or(i64::MAX);
+        // Never trust the caller's claimed size/hash: stream the blob
+        // actually present at the version's backend path and recompute both
+        // from the real bytes, never buffering more than one chunk (plus a
+        // small MIME-sniff prefix) in memory regardless of object size. A
+        // finalize with no prior successful PUT (no object at that path) or a
+        // forged size/hash claim is rejected here rather than silently
+        // persisted.
+        let (actual_size, actual_hash, mime_sniff_prefix) =
+            read_back_and_hash_streaming(backend.as_ref(), &version.backend_path).await?;
         if actual_size != size {
             return Err(DomainError::validation(
                 "size",
                 "claimed size does not match the uploaded content",
             ));
         }
-        Store::verify_content_hash(&blob, &hash_value)?;
-        // `verify_content_hash` already computed `sha256(blob)` internally and
-        // only returns `Ok` when it is byte-for-byte equal to `hash_value` —
-        // recomputing `hash::sha256(&blob)` here a second time would
-        // deterministically yield that exact same value again, so persist the
-        // already-verified `hash_value` instead of paying for a second
-        // full-blob hash pass (CodeRabbit nitpick).
-        let actual_hash = hash_value;
+        if actual_hash != hash_value {
+            return Err(DomainError::hash_mismatch(
+                hex::encode(&hash_value),
+                hex::encode(&actual_hash),
+            ));
+        }
 
         // Declared MIME type is never trustworthy either: validate the
         // read-back blob's real bytes against `version_mime` (reusing the
         // same magic-byte sniffing the in-process data plane runs at
-        // ingress), rejecting a mismatch before anything is finalized. The
+        // ingress), rejecting a mismatch before anything is finalized. Only
+        // the leading `MIME_SNIFF_PREFIX_BYTES` are needed — see that
+        // constant's doc comment for why that is always sufficient. The
         // returned type is the sniffed/canonical one when the bytes carry a
         // recognizable signature, otherwise the declared type unchanged.
         // @cpt-cf-file-storage-fr-content-type-validation
-        let validated_mime = validate_and_resolve_mime(&version_mime, &blob)?;
+        let validated_mime = validate_and_resolve_mime(&version_mime, &mime_sniff_prefix)?;
         enforce_size_ceiling_for_validated_mime(
             &policy,
             &version_mime,

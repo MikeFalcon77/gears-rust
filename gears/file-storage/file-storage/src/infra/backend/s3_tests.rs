@@ -100,6 +100,44 @@ async fn s3_backend_put_get_round_trip() {
     assert_eq!(raw, b"hello, contract");
 }
 
+/// `get_stream`'s eagerly-sent `GetObject` + `bytes_stream()` chunks must
+/// reassemble to the exact same bytes `get` returns, for an object large
+/// enough that a real HTTP response is plausibly delivered across more than
+/// one chunk (`assert_backend_contract`'s own `get_stream` check already
+/// covers the small-object case).
+#[tokio::test]
+async fn s3_backend_get_stream_reassembles_large_object() {
+    use futures::StreamExt;
+
+    let (addr, dir) = start_s3s_fs().await;
+    let bucket = unique_bucket();
+    let backend = make_backend(addr, &dir, &bucket).await;
+
+    let payload: Vec<u8> = (0..300_000)
+        .map(|i| u8::try_from(i % 256).unwrap())
+        .collect();
+    backend
+        .put("large/obj", Bytes::from(payload.clone()))
+        .await
+        .unwrap();
+
+    let mut stream = backend.get_stream("large/obj").await.unwrap();
+    let mut collected = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        collected.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(collected, payload);
+}
+
+#[tokio::test]
+async fn s3_backend_get_stream_missing_object_errors() {
+    let (addr, dir) = start_s3s_fs().await;
+    let bucket = unique_bucket();
+    let backend = make_backend(addr, &dir, &bucket).await;
+
+    assert!(backend.get_stream("nope/nope").await.is_err());
+}
+
 #[tokio::test]
 async fn s3_backend_get_range_returns_native_partial_content() {
     let (addr, dir) = start_s3s_fs().await;
@@ -275,6 +313,39 @@ async fn s3_backend_multipart_abort_discards_parts() {
     // The object was never completed, so it must not exist.
     assert!(backend.get(path).await.is_err());
     assert!(!backend.exists(path).await.unwrap());
+}
+
+#[tokio::test]
+async fn s3_backend_upload_part_rejects_part_number_outside_s3_limits() {
+    // Validation happens before any network I/O, so this deliberately does
+    // not start an `s3s-fs` server — an unreachable endpoint is enough to
+    // prove the rejection never gets as far as signing/sending a request.
+    let endpoint: url::Url = "http://127.0.0.1:1".parse().expect("valid endpoint url");
+    let backend = S3Backend::new(
+        "s3-test",
+        endpoint,
+        "us-east-1",
+        "unused-bucket",
+        TEST_ACCESS_KEY,
+        TEST_SECRET_KEY,
+    )
+    .expect("construct S3Backend");
+
+    let over_limit = backend
+        .upload_part("some/path", "handle", 10_001, Bytes::from_static(b"x"))
+        .await;
+    assert!(
+        over_limit.is_err(),
+        "part_number 10_001 exceeds S3's documented 10,000-part maximum and must be rejected"
+    );
+
+    let zero = backend
+        .upload_part("some/path", "handle", 0, Bytes::from_static(b"x"))
+        .await;
+    assert!(
+        zero.is_err(),
+        "part_number 0 is below S3's 1-indexed minimum and must be rejected"
+    );
 }
 
 /// Box a fixed set of chunks into the `BoxStream` shape `put_stream` expects.

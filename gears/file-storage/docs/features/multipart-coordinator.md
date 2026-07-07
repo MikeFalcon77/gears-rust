@@ -127,7 +127,7 @@ User-facing interactions that start with an actor (human or external system) and
 
 **Error Scenarios**:
 - Request body length does not match the size claim in the signed token -- 413 before any bytes written
-- Signed token is invalid, expired, or tampered -- 401/403
+- Signed token is invalid, expired, or tampered -- 403
 - Sidecar backend write failure -- 500
 
 **Steps** (current, shipped behavior):

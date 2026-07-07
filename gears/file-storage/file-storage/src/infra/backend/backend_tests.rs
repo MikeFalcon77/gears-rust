@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use file_storage_sdk::ByteRange;
+use futures::StreamExt;
 use futures::stream::{self, BoxStream};
 
 use crate::infra::content::hash;
@@ -15,10 +16,25 @@ fn unique_root() -> std::path::PathBuf {
     p
 }
 
+/// Assert that `backend.get_stream(path)`'s concatenated chunks are
+/// byte-for-byte equal to `backend.get(path)`'s result — the `get_stream`
+/// contract every `StorageBackend` implementation (default-fallback or a true
+/// chunked override) must satisfy. Factored out of `assert_backend_contract`
+/// to keep that function's own cognitive complexity down.
+async fn assert_get_stream_matches_get(backend: &dyn StorageBackend, path: &str, expected: &[u8]) {
+    let mut stream = backend.get_stream(path).await.unwrap();
+    let mut streamed = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        streamed.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(streamed, expected);
+}
+
 /// Shared behavioral contract every `StorageBackend` implementation must
 /// satisfy, factored out of what used to be per-backend hand-written
 /// `put/get/delete/exists/get_range` assertions (`in_memory_*`/`local_fs_*`
-/// duplicated the same checks). Covers: put -> get round trip, `get_range`
+/// duplicated the same checks). Covers: put -> get round trip, `get_stream`
+/// (streamed chunks reassemble to the same bytes `get` returns), `get_range`
 /// correctness for both the `Inclusive` and `Suffix` variants (mirroring the
 /// former `default_get_range_slices_content`/`get_range_suffix_returns_tail`
 /// assertions), idempotent `delete`, and `exists` distinguishing
@@ -35,6 +51,11 @@ pub async fn assert_backend_contract(backend: &dyn StorageBackend) {
         Bytes::from_static(b"hello, contract")
     );
     assert!(backend.exists("contract/put-get").await.unwrap());
+
+    // get_stream: concatenated chunks must equal get()'s bytes, for every
+    // backend regardless of whether it overrides the default single-chunk
+    // fallback with a true chunked read.
+    assert_get_stream_matches_get(backend, "contract/put-get", b"hello, contract").await;
 
     // get_range: Inclusive and Suffix variants.
     backend
@@ -256,6 +277,46 @@ async fn local_fs_put_stream_computes_hash_incrementally_matches_full_buffer_has
     // Sanity: the bytes actually landed at the target path too.
     assert_eq!(b.get("fid2/vid2").await.unwrap(), Bytes::from(concatenated));
 
+    drop(tokio::fs::remove_dir_all(&root).await);
+}
+
+/// `LocalFsBackend::get_stream`'s manual-chunked-read loop (64 KiB chunks)
+/// must reassemble a blob spanning multiple chunks to the exact same bytes
+/// `get` returns.
+#[tokio::test]
+async fn local_fs_get_stream_reassembles_multi_chunk_blob() {
+    let root = unique_root();
+    let b = LocalFsBackend::new("fs", &root);
+
+    // 200 KB — comfortably more than one 64 KiB chunk.
+    let payload: Vec<u8> = (0..200_000)
+        .map(|i| u8::try_from(i % 256).unwrap())
+        .collect();
+    b.put("fid/vid", Bytes::from(payload.clone()))
+        .await
+        .unwrap();
+
+    let mut stream = b.get_stream("fid/vid").await.unwrap();
+    let mut collected = Vec::new();
+    let mut chunk_count = 0u32;
+    while let Some(chunk) = stream.next().await {
+        collected.extend_from_slice(&chunk.unwrap());
+        chunk_count += 1;
+    }
+    assert_eq!(collected, payload);
+    assert!(
+        chunk_count > 1,
+        "a 200KB blob must be delivered as more than one 64KB chunk"
+    );
+
+    drop(tokio::fs::remove_dir_all(&root).await);
+}
+
+#[tokio::test]
+async fn local_fs_get_stream_missing_errors() {
+    let root = unique_root();
+    let b = LocalFsBackend::new("fs", &root);
+    assert!(b.get_stream("nope/nope").await.is_err());
     drop(tokio::fs::remove_dir_all(&root).await);
 }
 

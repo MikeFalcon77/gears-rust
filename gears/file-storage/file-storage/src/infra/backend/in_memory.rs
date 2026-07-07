@@ -106,6 +106,19 @@ impl StorageBackend for InMemoryBackend {
             .ok_or_else(|| DomainError::backend(&self.id, format!("blob not found: {path}")))
     }
 
+    /// Yields the stored `Bytes` as a single chunk: this backend is
+    /// explicitly non-durable, in-process storage for tests/dev deployments,
+    /// not a memory-DoS surface worth hardening — the override exists so the
+    /// shared backend contract tests can run identically against every
+    /// backend, not just `LocalFsBackend`/`S3Backend`.
+    async fn get_stream(
+        &self,
+        path: &str,
+    ) -> Result<BoxStream<'_, std::io::Result<Bytes>>, DomainError> {
+        let bytes = self.get(path).await?;
+        Ok(Box::pin(futures::stream::once(async move { Ok(bytes) })))
+    }
+
     async fn delete(&self, path: &str) -> Result<(), DomainError> {
         self.lock_blobs()?.remove(path);
         Ok(())

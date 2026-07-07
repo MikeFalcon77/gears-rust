@@ -1787,7 +1787,6 @@ dependencies = [
  "futures",
  "hex",
  "http",
- "hyper",
  "hyper-util",
  "infer",
  "inventory",

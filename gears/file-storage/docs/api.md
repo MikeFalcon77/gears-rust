@@ -313,9 +313,12 @@ already-`available` version persists.
 **On a bind conflict, re-bind — do not re-presign or re-upload.** Rebinding is a control-plane call
 (`POST /files/{id}/bind`), **independent of the signed upload URL** — so the upload URL's `exp` is irrelevant to the
 retry and the bytes are not re-sent (the version persists as-is). Re-presigning is **not** idempotent: a fresh
-`POST /files/{id}/versions` + upload creates a **new sibling `version_id`** (an unbound version is swept by the P2
-cleanup engine, `cpt-cf-file-storage-fr-orphan-reconciliation`). Clients **should** rebind the already-uploaded
-`version_id` instead.
+`POST /files/{id}/versions` + upload creates a **new sibling `version_id`**. If that sibling is abandoned before
+`finalize`, the cleanup engine's abandoned-pending sweep reclaims it after `orphan_grace_secs`
+(`cpt-cf-file-storage-fr-orphan-reconciliation`) — but if it is finalized (`available`) and simply never bound, it is
+**not** swept by anything today: it persists as an extra stored version until it is either bound or explicitly
+deleted. Clients **should** rebind the already-uploaded `version_id` instead, both to avoid the wasted upload and to
+avoid leaving this unswept sibling behind.
 
 ## Signed URLs
 

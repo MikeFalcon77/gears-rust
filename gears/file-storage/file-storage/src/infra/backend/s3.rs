@@ -231,6 +231,23 @@ impl S3Backend {
     fn head_error(&self, path: &str, status: StatusCode) -> DomainError {
         DomainError::backend(&self.id, format!("HEAD {path} failed: {status}"))
     }
+
+    /// Presign and execute a `GetObject` for `path` exactly like `get_stream`
+    /// does, but fold the response chunk-by-chunk into a `hash::Hasher`
+    /// accumulator instead of returning them, so at most one chunk is held in
+    /// memory at a time regardless of object size. Used by
+    /// `complete_multipart` to compute the trait-mandated whole-object
+    /// SHA-256 without re-inflating a (potentially huge) just-assembled
+    /// multipart object into memory.
+    async fn get_and_hash_streaming(&self, path: &str) -> Result<Vec<u8>, DomainError> {
+        let mut stream = self.get_stream(path).await?;
+        let mut hasher = hash::Hasher::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| DomainError::backend(&self.id, e.to_string()))?;
+            hasher.update(&chunk);
+        }
+        Ok(hasher.finalize())
+    }
 }
 
 impl fmt::Debug for S3Backend {
@@ -398,6 +415,41 @@ impl StorageBackend for S3Backend {
         self.send_and_check(self.http.get(url)).await
     }
 
+    /// Presign and execute a `GetObject` for `path`, returning the response
+    /// body as a `BoxStream` of chunks (`Response::bytes_stream()`) instead of
+    /// buffering it whole, so a read-back never holds more than one chunk in
+    /// memory at a time regardless of object size. The request itself is sent
+    /// and its status checked eagerly (before returning), so a missing object
+    /// or an S3 error surfaces from this call directly rather than from
+    /// polling the returned stream.
+    async fn get_stream(
+        &self,
+        path: &str,
+    ) -> Result<BoxStream<'_, std::io::Result<Bytes>>, DomainError> {
+        let key = Self::path_to_key(path);
+        let url = self
+            .bucket
+            .get_object(Some(&self.credentials), key)
+            .sign(SIGN_DURATION);
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| self.transport_err(&e))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.bytes().await.map_err(|e| self.transport_err(&e))?;
+            return Err(self.s3_error(status, &body));
+        }
+
+        let stream = resp
+            .bytes_stream()
+            .map(|r| r.map_err(std::io::Error::other));
+        Ok(Box::pin(stream))
+    }
+
     /// Native range read: signs a plain `GetObject` request and layers an
     /// **unsigned** `Range` header on top (valid because `Range` is not part
     /// of `SigV4`'s signed canonical request — ADR-0005's Decision Outcome).
@@ -555,6 +607,17 @@ impl StorageBackend for S3Backend {
     ) -> Result<(String, Vec<u8>), DomainError> {
         let part_hash = hash::sha256(&data);
 
+        // S3's documented limit is 10,000 parts per upload (1..=10_000,
+        // 1-indexed) — narrower than `u16::try_from`'s 65_535 ceiling, so that
+        // conversion alone would silently accept out-of-range part numbers
+        // S3 itself would reject.
+        if !(1..=10_000).contains(&part_number) {
+            return Err(DomainError::validation(
+                "part_number",
+                "must be between 1 and S3's maximum of 10,000 parts",
+            ));
+        }
+
         let key = Self::path_to_key(path);
         let part_number_u16 = u16::try_from(part_number).map_err(|_| {
             DomainError::validation("part_number", "exceeds S3's maximum of 10,000 parts")
@@ -592,9 +655,13 @@ impl StorageBackend for S3Backend {
     /// is expected to already pass them in order) via rusty-s3's own
     /// `CompleteMultipartUpload::body()` builder, POSTs it to the signed URL,
     /// then — per the trait's contract — re-reads the fully assembled object
-    /// with one `GetObject` and returns `hash::sha256` over it (S3's own
-    /// multipart `ETag` is an md5-of-part-md5s construction, not usable as
-    /// this gear's digest convention).
+    /// via a **streamed** `GetObject` and returns the SHA-256 computed
+    /// incrementally over its body (S3's own multipart `ETag` is an
+    /// md5-of-part-md5s construction, not usable as this gear's digest
+    /// convention). Streaming (rather than buffering the whole object via
+    /// `self.get`) keeps this bounded to one response chunk at a time, so
+    /// completing a multi-gigabyte multipart upload never re-inflates the
+    /// entire object into memory just to hash it — see `get_and_hash_streaming`.
     async fn complete_multipart(
         &self,
         path: &str,
@@ -616,11 +683,10 @@ impl StorageBackend for S3Backend {
         let body = action.body();
         self.send_and_check(self.http.post(url).body(body)).await?;
 
-        // Re-read the fully assembled object and hash it locally — the trait
-        // contract wants the SHA-256 of the actual stored bytes, not S3's own
-        // multipart ETag.
-        let assembled = self.get(path).await?;
-        Ok(hash::sha256(&assembled))
+        // Re-read the fully assembled object and hash it incrementally,
+        // rather than buffering it whole — the trait contract wants the
+        // SHA-256 of the actual stored bytes, not S3's own multipart ETag.
+        self.get_and_hash_streaming(path).await
     }
 
     /// `AbortMultipartUpload`: discards all previously uploaded parts.

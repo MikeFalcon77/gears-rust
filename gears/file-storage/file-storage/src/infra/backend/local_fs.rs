@@ -242,6 +242,41 @@ impl StorageBackend for LocalFsBackend {
         Ok(Bytes::from(data))
     }
 
+    /// Stream the blob at `path` from disk in fixed-size chunks via manual
+    /// `AsyncReadExt` reads, so a read-back (e.g. finalize's) never
+    /// materializes more than one chunk of the file in memory regardless of
+    /// its size. This crate does not otherwise depend on `tokio-util`, so
+    /// this deliberately avoids `ReaderStream` rather than pulling in a new
+    /// dependency for a single call site.
+    async fn get_stream(
+        &self,
+        path: &str,
+    ) -> Result<BoxStream<'_, std::io::Result<Bytes>>, DomainError> {
+        const CHUNK_SIZE: usize = 64 * 1024;
+
+        let target = self.resolve(path)?;
+        let file = tokio::fs::File::open(&target)
+            .await
+            .map_err(|e| self.io_err(e))?;
+
+        // `state` is `None` once a read has errored or the file is exhausted,
+        // so the stream terminates cleanly rather than re-polling a file
+        // handle that already reported an error.
+        let stream = futures::stream::unfold(Some(file), |state| async move {
+            let mut file = state?;
+            let mut buf = vec![0u8; CHUNK_SIZE];
+            match file.read(&mut buf).await {
+                Ok(0) => None,
+                Ok(n) => {
+                    buf.truncate(n);
+                    Some((Ok(Bytes::from(buf)), Some(file)))
+                }
+                Err(e) => Some((Err(e), None)),
+            }
+        });
+        Ok(Box::pin(stream))
+    }
+
     /// Native range read: seek to the requested offset and read only the
     /// requested bytes, never materializing the whole blob.
     async fn get_range(&self, path: &str, range: ByteRange) -> Result<Bytes, DomainError> {

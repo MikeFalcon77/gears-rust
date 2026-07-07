@@ -108,6 +108,29 @@ pub trait StorageBackend: Send + Sync {
     /// Read the whole blob at `path`.
     async fn get(&self, path: &str) -> Result<Bytes, DomainError>;
 
+    /// Stream the blob at `path` in chunks, without necessarily buffering the
+    /// whole object in memory at once. Used by `finalize_upload`'s read-back
+    /// verification (`cpt-cf-file-storage-fr-backend-abstraction`,
+    /// memory-safety fix mirroring `put_stream`'s streaming-write bound) to
+    /// recompute the actual size/hash/MIME-sniff-prefix from the real stored
+    /// bytes without re-inflating a potentially huge object into memory.
+    ///
+    /// The default implementation falls back to `get`, yielding the whole
+    /// blob as a single chunk (`futures::stream::once`) — still correct, just
+    /// not memory-bounded — so every backend that hasn't been upgraded to a
+    /// true streaming read stays correct; backends for which unbounded memory
+    /// use during a read-back is a real concern (e.g. `LocalFsBackend`,
+    /// `S3Backend`) should override this method.
+    async fn get_stream(
+        &self,
+        path: &str,
+    ) -> Result<futures::stream::BoxStream<'_, std::io::Result<Bytes>>, DomainError> {
+        let bytes = self.get(path).await?;
+        let stream: futures::stream::BoxStream<'_, std::io::Result<Bytes>> =
+            Box::pin(futures::stream::once(async move { Ok(bytes) }));
+        Ok(stream)
+    }
+
     /// Read a byte range of the blob at `path`. Default impl reads the whole
     /// blob then slices; range-native backends should override.
     async fn get_range(&self, path: &str, range: ByteRange) -> Result<Bytes, DomainError> {

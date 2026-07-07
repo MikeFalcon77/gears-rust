@@ -105,6 +105,5 @@ tower = { workspace = true }
 # HTTP server. Versions re-verified against crates.io in Stage 0 (matched pair).
 s3s = "0.14.1"
 s3s-fs = "0.14.1"
-hyper = { workspace = true }
 hyper-util = { workspace = true, features = ["server-auto", "tokio"] }
 tempfile = { workspace = true }
