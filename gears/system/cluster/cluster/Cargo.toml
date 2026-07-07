@@ -6,9 +6,11 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Cluster gear: wiring, lifecycle, and SDK-default backend implementations for the cluster coordination primitives"
+description = "The cluster gear: a RunnableCapability that reads operator config, registers per-profile, per-primitive coordination backends in the ClientHub, and owns the cluster lifecycle. Also exposes the wiring builder/handle as embeddable library API."
+readme = "README.md"
 keywords = ["constructorfabric", "cf-gears"]
 categories = ["development-tools"]
+metadata.docs.rs.all-features = true
 
 [lib]
 name = "cluster"
@@ -17,18 +19,25 @@ name = "cluster"
 workspace = true
 
 [dependencies]
-cf-gears-cluster-sdk = { workspace = true }
-async-trait = { workspace = true }
-tokio = { workspace = true }
-tokio-util = { workspace = true }
+cluster-sdk = { workspace = true }
+toolkit = { workspace = true }
 tracing = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros"] }
+tokio-util = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 rand = { workspace = true }
+cf-gears-standalone-cluster-plugin = { path = "../plugins/standalone-cluster-plugin" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
+serde-saphyr = { workspace = true }
+uuid = { workspace = true }
 tracing-test = { workspace = true }
-toolkit = { workspace = true }
+parking_lot = { workspace = true }
 # The shared backend-agnostic conformance suite, run against this gear's real
 # cache-derived default backends in `tests/conformance.rs`.
 cf-gears-cluster-conformance = { workspace = true }

@@ -29,7 +29,7 @@ resolution of the two open questions.
 - **Feature source**: the assignment recorded in [DECOMPOSITION.md](DECOMPOSITION.md)
   §2 ("Requirements Covered" per feature).
 - **Marker source**: `@cpt-dod:` markers grepped from `cluster-sdk/src`,
-  `cluster-sdk/tests`, `cluster-sdk/examples`, and `tools/dylint_lints/de14_cluster`.
+  `cluster-sdk/tests`, `cluster/examples`, and `tools/dylint_lints/de14_cluster`.
 - **Scope key**: `code` = realized by this change's shipped code; `follow-up` =
   enabling contract shipped here, full realization deferred to the wiring crate /
   parent host gear per PRD §4.1 (each still maps to a realizing ADR/DESIGN section,
@@ -103,7 +103,7 @@ orphan requirements.
 ## 4. Code Marker Verification
 
 34 distinct `@cpt-dod:` markers are wired in code across `cluster-sdk/src`,
-`cluster-sdk/tests`, `cluster-sdk/examples`, and the lint crate; a 35th,
+`cluster-sdk/tests`, `cluster/examples`, and the lint crate; a 35th,
 `cpt-cf-clst-dod-showcase-audit-traceability`, is carried by this audit document
 itself. Every in-scope feature (01–12) has at least one wired DoD marker:
 

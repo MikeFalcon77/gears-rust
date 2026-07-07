@@ -27,7 +27,7 @@ reason = "Ignore 'gears/system/authz-resolver' (not SDLC-documented yet: missing
 patterns = ["gears/system/authz-resolver/*"]
 
 [[ignore]]
-reason = "Ignore module 'cluster' traceability while the gear lands in stacked PRs: docs ship in the first PR but their code markers are split across the standalone-plugin and wiring/examples PRs. Removed in the final cluster PR once all code is present and full bidirectional traceability validates."
+reason = "Ignore module 'cluster' traceability pending a full bidirectional traceability audit now that standalone-plugin and wiring/examples code has landed."
 patterns = ["gears/system/cluster/*"]
 
 [[ignore]]
@@ -274,6 +274,11 @@ extensions = [".rs"]
 [[systems.autodetect.codebase]]
 name = "Nested SDK Tests"
 path = "{system_root}/{system}-sdk/tests"
+extensions = [".rs"]
+
+[[systems.autodetect.codebase]]
+name = "Nested SDK Examples"
+path = "{system_root}/{system}-sdk/examples"
 extensions = [".rs"]
 
 # Nested sub-plugin scope: account-management/docs/tr-plugin/ carries its own PRD/DESIGN/ADR.

@@ -1,4 +1,3 @@
-// Created: 2026-06-03 by Constructor Tech
 //! # Cluster SDK foundation
 //!
 //! `cluster_sdk` is the shared, serde-free, dyn-safe contract foundation every
@@ -74,7 +73,10 @@ pub use observability::{ClusterMetrics, InstrumentedCache, NoopMetrics};
 pub use profile::{
     CLUSTER_NAME_RULE, ClusterProfile, is_valid_cluster_name, validate_cluster_name,
 };
-pub use provider::{ClusterCacheProvider, StopHook};
+pub use provider::{
+    ClusterCacheProvider, ClusterLeaderElectionProvider, ClusterLockProvider,
+    ClusterServiceDiscoveryProvider, StopHook,
+};
 pub use registration::{
     deregister_cache_backend, deregister_leader_election_backend, deregister_lock_backend,
     deregister_service_discovery_backend, register_cache_backend, register_leader_election_backend,
