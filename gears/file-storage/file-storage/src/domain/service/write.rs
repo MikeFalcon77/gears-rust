@@ -34,11 +34,13 @@ use crate::infra::signed_url::{Claims, Op, UploadConstraints};
 /// [`mime::validate`]'s magic-byte sniffing (which only ever inspects a small
 /// bounded prefix — see that constant's doc comment).
 ///
-/// A missing object (no prior successful PUT) or any failure while reading
-/// its body back surfaces as the same `DomainError::validation("content",
-/// ...)` finalize has always used for this case — callers cannot distinguish
-/// "never uploaded" from "upload started but the object is now unreadable",
-/// and both are equally reasons to reject the finalize.
+/// A genuinely missing object (no prior successful PUT) surfaces as
+/// `DomainError::validation("content", ...)` — the client's finalize raced
+/// ahead of a completed PUT, a 4xx the caller can act on. A backend/transport
+/// failure while opening or reading the object back (e.g. an S3 connection
+/// dropped mid-read of a fully-uploaded blob) instead preserves the underlying
+/// `DomainError::backend` error, so a transient 5xx is not misreported as
+/// "never uploaded" and its root cause is not discarded.
 ///
 /// Returns `(actual_size, actual_hash, mime_sniff_prefix)`.
 async fn read_back_and_hash_streaming(
@@ -52,15 +54,30 @@ async fn read_back_and_hash_streaming(
         )
     };
 
-    let mut stream = backend
-        .get_stream(backend_path)
-        .await
-        .map_err(|_| no_content_err())?;
+    let mut stream = match backend.get_stream(backend_path).await {
+        Ok(stream) => stream,
+        // Opening the read-back stream failed. Only a genuinely-absent object
+        // (finalize raced ahead of a completed PUT) is the caller's fault and
+        // maps to the not-found validation error; a backend/transport failure
+        // preserves its original `DomainError` so a transient 5xx is not
+        // masked as "never uploaded". `exists` is the authoritative signal —
+        // if it too fails, err on surfacing the real backend error.
+        Err(open_err) => {
+            return Err(match backend.exists(backend_path).await {
+                Ok(false) => no_content_err(),
+                _ => open_err,
+            });
+        }
+    };
 
     let mut hasher = hash::Hasher::new();
     let mut prefix: Vec<u8> = Vec::with_capacity(MIME_SNIFF_PREFIX_BYTES);
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| no_content_err())?;
+        // A mid-stream read error means the object opened fine and then the
+        // backend/transport failed partway through — it is never "not
+        // uploaded". Preserve it as a backend error (mirroring `put_stream`'s
+        // chunk handling) rather than collapsing it into the not-found case.
+        let chunk = chunk.map_err(|e| DomainError::backend(backend.id(), e.to_string()))?;
         if prefix.len() < MIME_SNIFF_PREFIX_BYTES {
             let take = (MIME_SNIFF_PREFIX_BYTES - prefix.len()).min(chunk.len());
             prefix.extend_from_slice(&chunk[..take]);
