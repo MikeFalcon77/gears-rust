@@ -161,25 +161,7 @@ setup: .setup-stamp
 	@echo "Setup complete. All tools installed."
 	@touch .setup-stamp
 
-# -------- Code formatting --------
-
-.PHONY: fmt
-
-# Check code formatting
-fmt:
-	$(call check_rustup_component,rustfmt)
-	cargo fmt --all --check
-	cargo fmt --all --check --manifest-path tools/dylint_lints/Cargo.toml
-
-# -------- Gear naming validation --------
-
-.PHONY: validate-gear-names
-
-## Validate gear folder names follow kebab-case convention
-validate-gear-names:
-	@$(PYTHON) tools/scripts/validate_gear_names.py
-
-# -------- Code safety checks --------
+# -------- Checks --------
 #
 # Tool Comparison - What Each Tool Checks:
 # +-------------+----------------------------------------------------------------------+
@@ -222,7 +204,13 @@ validate-gear-names:
 # |             | - Use 'make dylint-list' to see all available custom lints           |
 # +-------------+----------------------------------------------------------------------+
 
-.PHONY: clippy clippy-deep lychee docs-preview kani geiger safety lint dylint dylint-list dylint-test shear gts-docs cfs-ensure cfs-repair cfs-validate cfs-validate-kits cfs-validate-kit-local cfs-spec-coverage
+.PHONY: fmt clippy clippy-deep lychee docs-preview kani geiger safety lint dylint dylint-list dylint-test shear gts-docs cfs-ensure cfs-repair cfs-validate cfs-validate-kits cfs-validate-kit-local cfs-spec-coverage
+
+# Check code formatting
+fmt:
+	$(call check_rustup_component,rustfmt)
+	cargo fmt --all --check
+	cargo fmt --all --check --manifest-path tools/dylint_lints/Cargo.toml
 
 CFS ?= cfs
 CFS_PIPX_SPEC ?= git+https://github.com/constructorfabric/studio.git
@@ -250,59 +238,27 @@ clippy:
 	cargo clippy --workspace --all-targets --all-features $(CLIPPY_FLAGS)
 	cargo hack clippy $(CLIPPY_HACK_CRATES) --all-targets --each-feature $(CLIPPY_FLAGS)
 
-# Full feature-matrix clippy: one pass per (crate × feature).
-# ~182 runs — intended for nightly CI and pre-release validation, not PRs.
+## Full feature-matrix clippy: one pass per (crate × feature).
+## ~182 runs — intended for nightly CI and pre-release validation, not PRs.
 clippy-deep:
 	$(call check_rustup_component,clippy)
 	$(call check_tool,cargo-hack)
 	cargo hack clippy --workspace --all-targets --each-feature $(CLIPPY_FLAGS)
-
-# Ensure the Constructor Studio CLI is available even when generated runtime
-# files are ignored locally or absent in a clean checkout.
-cfs-ensure:
-	@if ! command -v $(CFS) >/dev/null 2>&1; then \
-		echo "cfs not found; installing $(CFS_PIPX_SPEC) via pipx"; \
-		if ! command -v pipx >/dev/null 2>&1; then \
-			echo "ERROR: pipx is required before running this target"; \
-			exit 1; \
-		else \
-			pipx install $(CFS_PIPX_SPEC); \
-		fi; \
-	fi
-	@if ! command -v $(CFS) >/dev/null 2>&1; then \
-		echo "ERROR: cfs was installed but is not on PATH"; \
-		exit 1; \
-	fi
-
-# Repair ignored/generated Constructor Studio runtime files before validation.
-cfs-repair: cfs-ensure
-	$(CFS) init --yes
-
-# Check Constructor Studio spec-to-code traceability coverage.
-cfs-spec-coverage: cfs-repair
-	$(CFS) spec-coverage --min-coverage 80
-
-# Validate Constructor Studio artifacts (specs, code, templates).
-cfs-validate: cfs-repair
-	$(CFS) validate && echo "OK. Constructor Studio validation PASSED" || (echo "ERROR: Constructor Studio validation FAILED"; exit 1)
-
-# Validate registered Constructor Studio kits.
-cfs-validate-kits: cfs-repair
-	$(CFS) validate-kits
-
-# Validate the local studio-kit-gears checkout as a kit directory.
-cfs-validate-kit-local: cfs-repair
-	cd studio-kit-gears && $(CFS) validate-kits .
 
 # Run markdown checks with 'lychee'
 lychee:
 	$(call check_tool,lychee)
 	lychee --exclude-path 'docs/web-docs' docs examples tools/dylint_lints guidelines
 
-# Preview the documentation website with local docs/web-docs content.
-# Clones the web docs site into .web-docs-preview/ and serves it at localhost:4321.
-docs-preview:
-	@bash tools/scripts/docs-preview.sh
+## Validate internal links in web-docs.
+# The web-docs pages use Starlight route-relative links (e.g. ../foo/) that only
+# resolve against the *built* site, not the markdown source — so we build the
+# docs site with the local content and run lychee over the generated HTML.
+WEB_DOCS_CACHE ?= .web-docs-preview
+web-docs-check:
+	$(call check_tool,lychee)
+	@bash tools/scripts/docs-preview.sh build
+	lychee --offline --root-dir '$(abspath $(WEB_DOCS_CACHE)/dist)' --exclude 'i18n' '$(WEB_DOCS_CACHE)/dist/**/*.html'
 
 ## The Kani Rust Verifier for checking safety of the code
 kani:
@@ -368,11 +324,15 @@ shear:
 safety: clippy kani lint dylint # geiger
 	@echo "OK. Rust Safety Pipeline complete"
 
+## Validate gear folder names follow kebab-case convention
+validate-gear-names:
+	@$(PYTHON) tools/scripts/validate_gear_names.py
+
 # -------- Code security checks --------
 
 .PHONY: deny fips-policy security
 
-## Check licenses and dependencies
+# Check licenses and dependencies
 deny:
 	$(call check_tool,cargo-deny)
 	cargo deny check
@@ -387,9 +347,48 @@ fips-policy:
 
 security: deny fips-policy
 
+# -------- Studio --------
+
+# Validate Constructor Studio artifacts (specs, code, templates).
+cfs-validate: cfs-repair
+	$(CFS) validate && echo "OK. Constructor Studio validation PASSED" || (echo "ERROR: Constructor Studio validation FAILED"; exit 1)
+
+# Ensure the Constructor Studio CLI is available even when generated runtime
+# files are ignored locally or absent in a clean checkout.
+cfs-ensure:
+	@if ! command -v $(CFS) >/dev/null 2>&1; then \
+		echo "cfs not found; installing $(CFS_PIPX_SPEC) via pipx"; \
+		if ! command -v pipx >/dev/null 2>&1; then \
+			echo "ERROR: pipx is required before running this target"; \
+			exit 1; \
+		else \
+			pipx install $(CFS_PIPX_SPEC); \
+		fi; \
+	fi
+	@if ! command -v $(CFS) >/dev/null 2>&1; then \
+		echo "ERROR: cfs was installed but is not on PATH"; \
+		exit 1; \
+	fi
+
+## Repair ignored/generated Constructor Studio runtime files before validation.
+cfs-repair: cfs-ensure
+	$(CFS) init --yes
+
+## Check Constructor Studio spec-to-code traceability coverage.
+cfs-spec-coverage: cfs-repair
+	$(CFS) spec-coverage --min-coverage 80
+
+## Validate registered Constructor Studio kits.
+cfs-validate-kits: cfs-repair
+	$(CFS) validate-kits
+
+## Validate the local studio-kit-gears checkout as a kit directory.
+cfs-validate-kit-local: cfs-repair
+	cd studio-kit-gears && $(CFS) validate-kits .
+
 # -------- API and docs --------
 
-.PHONY: openapi md-fabric
+.PHONY: openapi md-fabric slides web-docs-preview
 
 # Generate OpenAPI spec from running cf-gears-example-server
 openapi:
@@ -412,6 +411,11 @@ md-fabric:
 slides:
 	@command -v npx >/dev/null || (echo "npx is required to build slides. Install Node.js or run 'npm install' from the repo root." && exit 1)
 	npx marp docs/slides/[0-9]*.md --theme-set docs/slides/css/slides.css --allow-local-files
+
+# Preview the documentation website with local docs/web-docs content.
+# Clones the web docs site into .web-docs-preview/ and serves it at localhost:4321.
+web-docs-preview:
+	@bash tools/scripts/docs-preview.sh
 
 # -------- Development and auto fix --------
 
@@ -531,7 +535,7 @@ bench-mysql:
 bench-mariadb:
 	cargo bench -p cf-gears-toolkit-db --features mysql,preview-outbox --bench outbox_throughput -- mariadb
 
-## Run outbox throughput benchmarks against SQLite
+# Run outbox throughput benchmarks against SQLite
 bench-sqlite:
 	cargo bench -p cf-gears-toolkit-db --features sqlite,preview-outbox --bench outbox_throughput -- sqlite
 
@@ -648,7 +652,7 @@ fuzz-run: fuzz-install
 	fi
 	cargo +nightly fuzz run --fuzz-dir tools/fuzz $(FUZZ_TARGET) -- -max_total_time=$(or $(FUZZ_SECONDS),60)
 
-## Run all fuzz targets for a short time (smoke test)
+# Run all fuzz targets for a short time (smoke test)
 fuzz: fuzz-build
 	@echo "Running all fuzz targets for 30 seconds each..."
 	@FAILED=0; \
@@ -676,25 +680,13 @@ fuzz-corpus: fuzz-install
 	fi
 	cargo +nightly fuzz cmin --fuzz-dir tools/fuzz $(FUZZ_TARGET)
 
-# -------- Main targets --------
-
-.PHONY: all check ci ci_test ci_docs build cargo-build split-debug quickstart example mini-chat mini-chat-docker mini-chat-helm mini-chat-helm-template mini-chat-up mini-chat-down mini-chat-port-forward
-
-# Start server with quickstart config
-quickstart:
-	mkdir -p data
-	cargo run --bin cf-gears-example-server -- --config config/quickstart.yaml run
-
-## Run server with example gear
-example:
-	cargo run --bin cf-gears-example-server $(E2E_ARGS) -- --config config/quickstart.yaml run
+# -------- Mini chat --------
 
 # mini-chat targets are for running the mini-chat gear locally and in Kubernetes, with options for building Docker images and deploying with Helm.
-## Run server with fips gear
-fips:
-	cargo run --bin cf-gears-example-server --features fips,static-authn,static-authz,single-tenant,static-credstore,otel -- --config config/quickstart.yaml run
 
-## Run server with mini-chat gear
+.PHONY: mini-chat mini-chat-docker mini-chat-helm mini-chat-helm-template mini-chat-up mini-chat-down mini-chat-port-forward
+
+# Run server with mini-chat gear
 mini-chat:
 	cargo run --bin cf-gears-example-server --features mini-chat,static-authn,static-authz,single-tenant,static-credstore,otel -- --config config/mini-chat.yaml run
 
@@ -810,6 +802,24 @@ mini-chat-down:
 	helm uninstall mini-chat 2>/dev/null || true
 	@echo "mini-chat uninstalled"
 
+# -------- Main targets --------
+
+.PHONY: all check ci ci_test ci_docs build .cargo-build .split-debug quickstart example mini-chat mini-chat-docker mini-chat-helm mini-chat-helm-template mini-chat-up mini-chat-down mini-chat-port-forward
+
+# Start server with quickstart config
+quickstart:
+	mkdir -p data
+	cargo run --bin cf-gears-example-server -- --config config/quickstart.yaml run
+
+# Run server with example gear
+example:
+	cargo run --bin cf-gears-example-server $(E2E_ARGS) -- --config config/quickstart.yaml run
+
+## Run server with fips gear
+fips:
+	cargo run --bin cf-gears-example-server --features fips,static-authn,static-authz,single-tenant,static-credstore,otel -- --config config/quickstart.yaml run
+
+## Run server with out-of-process example gear
 oop-example:
 	cargo build -p calculator --features oop_gear
 	cargo run --bin cf-gears-example-server --features oop-example,users-info-example,static-authn,static-authz,static-tenants,static-credstore -- --config config/quickstart.yaml run
@@ -824,20 +834,20 @@ ci_docs: lychee gts-docs
 # Run CI pipeline locally, requires docker
 ci: fmt clippy test-no-macros test-macros test-db deny test-users-info-pg lychee gts-docs dylint dylint-test
 
-# Build the cf-gears-example-server release binary using a toolchain from the rust-toolchain.toml
-cargo-build:
+## Build the cf-gears-example-server release binary using a toolchain from the rust-toolchain.toml
+.cargo-build:
 	cargo build --release --bin cf-gears-example-server $(E2E_ARGS)
 
-# Split debug symbols into separate artifact(s) and strip the binary.
-# Requires platform tools: objcopy (Linux), dsymutil+strip (macOS).
-# On Windows MSVC the PDB is already separate; no extra tools needed.
-split-debug:
+## Split debug symbols into separate artifact(s) and strip the binary.
+## Requires platform tools: objcopy (Linux), dsymutil+strip (macOS).
+## On Windows MSVC the PDB is already separate; no extra tools needed.
+.split-debug:
 	cargo xtask split-debug cf-gears-example-server
 
 # Build the release binary, then split debug symbols.
 # Use 'make cargo-build' if you don't need stripped artifacts or lack
 # platform debug-splitting tools (objcopy, dsymutil).
-build: cargo-build split-debug
+build: .cargo-build .split-debug
 
 # Run all necessary quality checks and tests and then build the release binary
 all: build check test-sqlite e2e-local openapi
