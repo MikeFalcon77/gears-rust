@@ -32,6 +32,7 @@ cf-gears-file-storage-sdk = { path = "../file-storage-sdk" }
 
 # Authorization Service (PEP) — per-type access decisions
 cf-gears-authz-resolver-sdk = { path = "../../system/authz-resolver/authz-resolver-sdk" }
+authz-resolver = { workspace = true }
 
 # Core dependencies
 anyhow = { workspace = true }
