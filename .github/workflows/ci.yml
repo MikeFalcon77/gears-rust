@@ -8,6 +8,10 @@ on:
       - 'docs/**'
   workflow_dispatch:
 
+# NOTE: workflow-level paths-ignore above still skips the entire workflow for
+# pure doc/markdown changes.  The per-job path filters below provide finer
+# granularity so that, e.g., a Cargo.toml-only change skips FIPS/dylint.
+
 # Concurrency strategy:
 # - On pull_request: group by PR number. New commits cancel the in-flight run.
 # - On push (main/develop): include run_id so pushes never cancel each other,
@@ -29,11 +33,59 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  # ── Change detection ──────────────────────────────────────────────────
+  # Lightweight first job that classifies which areas of the repo changed.
+  # Downstream jobs use these outputs to skip work that can't be affected.
+  # On workflow_dispatch every filter defaults to true (run everything).
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust:   ${{ steps.filter.outputs.rust }}
+      fips:   ${{ steps.filter.outputs.fips }}
+      dylint: ${{ steps.filter.outputs.dylint }}
+      deps:   ${{ steps.filter.outputs.deps }}
+      ci:     ${{ steps.filter.outputs.ci }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Detect changed paths
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        id: filter
+        with:
+          filters: |
+            rust:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - 'Cargo.lock'
+              - 'Makefile'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+            fips:
+              - 'libs/toolkit-http/**'
+              - 'libs/rustls-*/**'
+            dylint:
+              - 'tools/dylint_lints/**'
+            deps:
+              - '**/Cargo.toml'
+              - 'Cargo.lock'
+              - 'deny.toml'
+            ci:
+              - '.github/workflows/**'
+
+  # ── Jobs ──────────────────────────────────────────────────────────────
+
   # Fast clippy: ubuntu only, 2-pass strategy (~5-6 min vs 30-40 min before).
   # Linting output is platform-independent; platform-specific paths (fips) are
   # covered by the test-fips job. Full feature matrix runs nightly (clippy-nightly.yml).
   clippy:
     name: Clippy
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-C debuginfo=0"
@@ -87,6 +139,8 @@ jobs:
 
   test:
     name: Test Suite (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -157,6 +211,8 @@ jobs:
 
   integration:
     name: Integration tests
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-C debuginfo=0"
@@ -224,6 +280,8 @@ jobs:
 
   test-fips:
     name: FIPS verification (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.fips == 'true' || needs.changes.outputs.deps == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -319,6 +377,8 @@ jobs:
 
   security:
     name: Security (cargo-deny & cargo-audit on Ubuntu)
+    needs: changes
+    if: needs.changes.outputs.deps == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -341,6 +401,8 @@ jobs:
 
   coverage:
     name: Code Coverage (cargo-llvm-cov)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -404,6 +466,8 @@ jobs:
 
   dylint:
     name: Dylint Tests
+    needs: changes
+    if: needs.changes.outputs.dylint == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       RUSTUP_TOOLCHAIN: nightly-2026-04-16
@@ -443,6 +507,8 @@ jobs:
 
   shear:
     name: Unused Deps (cargo-shear)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       RUSTUP_TOOLCHAIN: nightly-2026-04-16
