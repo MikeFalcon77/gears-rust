@@ -87,7 +87,12 @@ jobs:
   clippy:
     name: Clippy
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.rust == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-C debuginfo=0"
@@ -152,7 +157,12 @@ jobs:
   test:
     name: Test Suite (${{ matrix.os }})
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.rust == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -235,7 +245,12 @@ jobs:
   integration:
     name: Integration tests
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.rust == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-C debuginfo=0"
@@ -314,7 +329,13 @@ jobs:
   test-fips:
     name: FIPS verification (${{ matrix.os }})
     needs: changes
-    if: needs.changes.outputs.fips == 'true' || needs.changes.outputs.deps == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.fips == 'true'
+      || needs.changes.outputs.deps == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -422,7 +443,12 @@ jobs:
   security:
     name: Security (cargo-deny & cargo-audit on Ubuntu)
     needs: changes
-    if: needs.changes.outputs.deps == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.deps == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -446,7 +472,12 @@ jobs:
   coverage:
     name: Code Coverage (cargo-llvm-cov)
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.rust == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -511,7 +542,13 @@ jobs:
   dylint:
     name: Dylint Tests
     needs: changes
-    if: needs.changes.outputs.dylint == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.dylint == 'true'
+      || needs.changes.outputs.rust == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     env:
       RUSTUP_TOOLCHAIN: ${{ env.RUSTUP_TOOLCHAIN_NIGHTLY }}
@@ -573,7 +610,12 @@ jobs:
   shear:
     name: Unused Deps (cargo-shear)
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      !cancelled()
+      && (needs.changes.result != 'success'
+      || needs.changes.outputs.rust == 'true'
+      || needs.changes.outputs.ci == 'true'
+      || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     # Advisory only — unused-dep warnings should not block PRs.
     continue-on-error: true
