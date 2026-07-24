@@ -267,7 +267,7 @@ impl AuthNResolverPluginClient for OidcAuthNPlugin {
                 "authentication completed"
             );
 
-            Ok(AuthenticationResult { security_context })
+            Ok(AuthenticationResult::authenticated(security_context))
         }
         .await;
 
@@ -320,7 +320,7 @@ impl AuthNResolverPluginClient for OidcAuthNPlugin {
                 Some(self.s2s_default_subject_type.as_str()),
             )?;
 
-            Ok(AuthenticationResult { security_context })
+            Ok(AuthenticationResult::authenticated(security_context))
         }
         .await;
 

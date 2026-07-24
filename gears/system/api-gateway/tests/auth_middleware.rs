@@ -12,6 +12,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use authn_resolver_sdk::{
     AuthNResolverClient, AuthNResolverError, AuthenticationResult, ClientCredentialsRequest,
+    VerifiedPrincipal,
 };
 use axum::{
     Extension, Json, Router,
@@ -123,6 +124,35 @@ async fn protected_handler(Extension(ctx): Extension<SecurityContext>) -> Json<T
     Json(TestResponse {
         message: "Protected resource accessed".to_owned(),
         user_id: ctx.subject_id().to_string(),
+    })
+}
+
+/// Test response exposing `SecurityContext`- and `VerifiedPrincipal`-derived
+/// fields independently, so tests can assert both extensions were present
+/// and correct without collapsing the comparison into handler logic.
+#[derive(Clone)]
+#[toolkit_macros::api_dto(response)]
+struct PrincipalTestResponse {
+    security_subject_id: String,
+    principal_subject_id: String,
+    external_subject: String,
+}
+
+/// Handler that requires both `SecurityContext` and `VerifiedPrincipal`
+/// (via Extension extractors). Verifies the gateway inserts the principal on
+/// the request when the plugin produced one (ADR 0005). If the principal
+/// extension is absent — including when the gateway middleware drops it for
+/// violating the `subject_id` invariant — Axum's extractor rejection yields a
+/// 5xx, which is the documented behaviour for a principal-requiring route on
+/// an authenticated request without one.
+async fn principal_handler(
+    Extension(ctx): Extension<SecurityContext>,
+    Extension(principal): Extension<VerifiedPrincipal>,
+) -> Json<PrincipalTestResponse> {
+    Json(PrincipalTestResponse {
+        security_subject_id: ctx.subject_id().to_string(),
+        principal_subject_id: principal.subject_id.to_string(),
+        external_subject: principal.external_subject,
     })
 }
 
@@ -741,6 +771,22 @@ impl RestApiCapability for TestAuthEnabledGear {
             .error_403(openapi)
             .register(router, openapi);
 
+        // Protected route that also requires a VerifiedPrincipal (ADR 0005).
+        let router = OperationBuilder::get("/tests/v1/api/principal")
+            .operation_id("test_auth.principal")
+            .authenticated()
+            .require_license_features::<License>([])
+            .summary("Protected endpoint requiring a verified principal")
+            .handler(principal_handler)
+            .json_response_with_schema::<PrincipalTestResponse>(
+                openapi,
+                http::StatusCode::OK,
+                "Success",
+            )
+            .error_401(openapi)
+            .error_403(openapi)
+            .register(router, openapi);
+
         // Public route that extracts SecurityContext so tests can verify anonymous ctx
         let router = OperationBuilder::get("/tests/v1/api/public-ctx")
             .operation_id("test_auth.public_ctx")
@@ -825,13 +871,88 @@ fn mock_accepting_token(
     MockAuthNResolverClient {
         handler: Arc::new(move |token| {
             if token == valid_token {
-                Ok(AuthenticationResult {
-                    security_context: SecurityContext::builder()
+                Ok(AuthenticationResult::authenticated(
+                    SecurityContext::builder()
                         .subject_id(subject_id)
                         .subject_tenant_id(tenant_id)
                         .build()
                         .unwrap(),
-                })
+                ))
+            } else {
+                Err(AuthNResolverError::Unauthorized("invalid token".to_owned()))
+            }
+        }),
+    }
+}
+
+/// Build a mock that accepts a specific token and returns a result carrying a
+/// `VerifiedPrincipal` (ADR 0005 request-extension tests). The principal's
+/// `subject_id` matches the `SecurityContext` subject to uphold the invariant.
+fn mock_accepting_token_with_principal(
+    valid_token: &'static str,
+    subject_id: Uuid,
+    tenant_id: Uuid,
+    external_subject: &'static str,
+) -> MockAuthNResolverClient {
+    MockAuthNResolverClient {
+        handler: Arc::new(move |token| {
+            if token == valid_token {
+                let ctx = SecurityContext::builder()
+                    .subject_id(subject_id)
+                    .subject_tenant_id(tenant_id)
+                    .build()
+                    .unwrap();
+                let principal = VerifiedPrincipal {
+                    subject_id,
+                    external_subject: external_subject.to_owned(),
+                    issuer: "https://issuer.example".to_owned(),
+                    email: Some("user@example.com".to_owned()),
+                    email_verified: Some(true),
+                    provider: "password".to_owned(),
+                    is_anonymous: false,
+                    issued_at: 0,
+                    auth_time: 0,
+                    expires_at: 0,
+                };
+                Ok(AuthenticationResult::with_principal(ctx, principal))
+            } else {
+                Err(AuthNResolverError::Unauthorized("invalid token".to_owned()))
+            }
+        }),
+    }
+}
+
+/// Build a mock that violates the ADR 0005 invariant: the returned
+/// `VerifiedPrincipal.subject_id` does NOT match the `SecurityContext`
+/// `subject_id` for the same result. Used to test that the gateway
+/// middleware drops such a principal instead of inserting it.
+fn mock_accepting_token_with_mismatched_principal(
+    valid_token: &'static str,
+    security_subject_id: Uuid,
+    tenant_id: Uuid,
+    principal_subject_id: Uuid,
+) -> MockAuthNResolverClient {
+    MockAuthNResolverClient {
+        handler: Arc::new(move |token| {
+            if token == valid_token {
+                let ctx = SecurityContext::builder()
+                    .subject_id(security_subject_id)
+                    .subject_tenant_id(tenant_id)
+                    .build()
+                    .unwrap();
+                let principal = VerifiedPrincipal {
+                    subject_id: principal_subject_id,
+                    external_subject: "mismatched-uid".to_owned(),
+                    issuer: "https://issuer.example".to_owned(),
+                    email: Some("user@example.com".to_owned()),
+                    email_verified: Some(true),
+                    provider: "password".to_owned(),
+                    is_anonymous: false,
+                    issued_at: 0,
+                    auth_time: 0,
+                    expires_at: 0,
+                };
+                Ok(AuthenticationResult::with_principal(ctx, principal))
             } else {
                 Err(AuthNResolverError::Unauthorized("invalid token".to_owned()))
             }
@@ -855,14 +976,14 @@ fn mock_accepting_token_with_scopes(
     MockAuthNResolverClient {
         handler: Arc::new(move |token| {
             if token == valid_token {
-                Ok(AuthenticationResult {
-                    security_context: SecurityContext::builder()
+                Ok(AuthenticationResult::authenticated(
+                    SecurityContext::builder()
                         .subject_id(Uuid::new_v4())
                         .subject_tenant_id(Uuid::new_v4())
                         .token_scopes(scopes.clone())
                         .build()
                         .unwrap(),
-                })
+                ))
             } else {
                 Err(AuthNResolverError::Unauthorized("invalid token".to_owned()))
             }
@@ -1241,6 +1362,183 @@ async fn test_insufficient_scope_returns_403_with_challenge() {
     let problem = problem_from(response).await;
     assert_eq!(problem.problem_type, PERMISSION_DENIED_TYPE);
     assert_eq!(problem.context["reason"], "INSUFFICIENT_SCOPES");
+}
+
+// --- ADR 0005: VerifiedPrincipal request-extension tests ---
+
+/// When the plugin produces a `VerifiedPrincipal`, the gateway inserts it into
+/// the request extensions and it reaches a handler that extracts it —
+/// alongside the `SecurityContext`, both independently correct.
+#[tokio::test]
+async fn test_principal_reaches_handler() {
+    let subject_id = Uuid::new_v4();
+    let tenant_id = Uuid::new_v4();
+    let mock = mock_accepting_token_with_principal(
+        "valid-test-token",
+        subject_id,
+        tenant_id,
+        "firebase-uid-123",
+    );
+
+    let router = create_auth_enabled_router(mock, false).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/tests/v1/api/principal")
+                .header(header::AUTHORIZATION, "Bearer valid-test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("Request failed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["external_subject"], "firebase-uid-123");
+    assert_eq!(json["principal_subject_id"], subject_id.to_string());
+}
+
+/// `SecurityContext` and `VerifiedPrincipal` both reach a handler that
+/// extracts both extensions, and their subject ids agree — proving the two
+/// extensions genuinely coexist on the request (ADR 0005 invariant), rather
+/// than asserting only one of the two extensions ever ran.
+#[tokio::test]
+async fn test_security_context_and_principal_coexist_with_matching_subject() {
+    let subject_id = Uuid::new_v4();
+    let tenant_id = Uuid::new_v4();
+    let mock = mock_accepting_token_with_principal(
+        "valid-test-token",
+        subject_id,
+        tenant_id,
+        "firebase-uid-123",
+    );
+
+    let router = create_auth_enabled_router(mock, false).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/tests/v1/api/principal")
+                .header(header::AUTHORIZATION, "Bearer valid-test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("Request failed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["security_subject_id"], subject_id.to_string());
+    assert_eq!(json["principal_subject_id"], subject_id.to_string());
+}
+
+/// A principal-requiring route hit with a token whose plugin produced **no**
+/// principal returns exactly `500` (Axum's `Extension<T>` extractor
+/// rejection), not a 401 — per ADR 0005, a missing principal on an
+/// authenticated request is an internal wiring error.
+#[tokio::test]
+async fn test_missing_principal_on_principal_route_is_500() {
+    let subject_id = Uuid::new_v4();
+    let tenant_id = Uuid::new_v4();
+    let mock = mock_accepting_token("valid-test-token", subject_id, tenant_id);
+
+    let router = create_auth_enabled_router(mock, false).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/tests/v1/api/principal")
+                .header(header::AUTHORIZATION, "Bearer valid-test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "missing principal on an authenticated principal-route must be exactly 500"
+    );
+}
+
+/// When a plugin violates the ADR 0005 invariant (`VerifiedPrincipal.subject_id`
+/// doesn't match `SecurityContext.subject_id`), the gateway middleware drops
+/// the principal instead of inserting it — so a principal-requiring route
+/// behaves exactly as if no principal had been produced at all: `500`, not a
+/// leaked cross-subject principal.
+#[tokio::test]
+async fn test_mismatched_principal_is_dropped_not_inserted() {
+    let security_subject_id = Uuid::new_v4();
+    let principal_subject_id = Uuid::new_v4();
+    let tenant_id = Uuid::new_v4();
+    let mock = mock_accepting_token_with_mismatched_principal(
+        "valid-test-token",
+        security_subject_id,
+        tenant_id,
+        principal_subject_id,
+    );
+
+    let router = create_auth_enabled_router(mock, false).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/tests/v1/api/principal")
+                .header(header::AUTHORIZATION, "Bearer valid-test-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("Request failed");
+
+    assert_eq!(
+        response.status(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "a subject_id-mismatched principal must be dropped, not inserted"
+    );
+}
+
+/// A bad token on a principal-requiring route still fails with `401` before
+/// the request ever reaches the router's extractors — proving auth failure
+/// takes precedence over extension/extractor concerns, even for a mock that
+/// would have produced a principal had the token been valid. (Principal
+/// *insertion* itself can't be observed from outside the middleware; this
+/// test instead pins the externally-observable ordering guarantee.)
+#[tokio::test]
+async fn test_failed_auth_on_principal_route_returns_401_not_500() {
+    let mock = mock_accepting_token_with_principal(
+        "valid-test-token",
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        "firebase-uid-123",
+    );
+
+    let router = create_auth_enabled_router(mock, false).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/tests/v1/api/principal")
+                .header(header::AUTHORIZATION, "Bearer wrong-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("Request failed");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(content_type(&response), PROBLEM_JSON);
+    let problem = problem_from(response).await;
+    assert_eq!(problem.problem_type, UNAUTHENTICATED_TYPE);
 }
 
 #[tokio::test]

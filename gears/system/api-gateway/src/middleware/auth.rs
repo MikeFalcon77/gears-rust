@@ -219,7 +219,27 @@ pub async fn authn_middleware(
             match state.authn_client.authenticate(token).await {
                 Ok(result) => {
                     log_auth_succeeded(req.method(), path.as_str(), &result.security_context);
+                    let subject_id = result.security_context.subject_id();
                     req.extensions_mut().insert(result.security_context);
+                    // Carry verified profile claims on the request when the plugin
+                    // produced them (ADR 0005). Handlers that need a principal read
+                    // it from this extension; those that don't are unaffected.
+                    //
+                    // A mismatched subject_id means the plugin violated the ADR 0005
+                    // invariant — drop the principal rather than risk exposing one
+                    // subject's verified profile under another subject's identity.
+                    // Missing-principal routes still fail closed (5xx) as documented.
+                    if let Some(principal) = result.principal {
+                        if principal.subject_id == subject_id {
+                            req.extensions_mut().insert(principal);
+                        } else {
+                            log_principal_subject_mismatch(
+                                path.as_str(),
+                                subject_id,
+                                principal.subject_id,
+                            );
+                        }
+                    }
                     next.run(req).await
                 }
                 Err(err) => authn_error_to_response(&err),
@@ -242,6 +262,22 @@ fn log_auth_succeeded(method: &Method, path: &str, security_context: &SecurityCo
         path,
         subject_id = %security_context.subject_id(),
         "authentication succeeded"
+    );
+}
+
+/// Logged when a plugin violates the ADR 0005 invariant that
+/// `principal.subject_id` must equal `security_context.subject_id()`. The
+/// principal is dropped rather than inserted (see call site).
+fn log_principal_subject_mismatch(
+    path: &str,
+    security_context_subject_id: uuid::Uuid,
+    principal_subject_id: uuid::Uuid,
+) {
+    tracing::error!(
+        path,
+        security_context_subject_id = %security_context_subject_id,
+        principal_subject_id = %principal_subject_id,
+        "AuthN plugin returned a VerifiedPrincipal with a mismatched subject_id; dropping principal"
     );
 }
 

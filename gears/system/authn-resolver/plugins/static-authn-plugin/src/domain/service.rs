@@ -156,9 +156,7 @@ fn build_result(
         .map_err(|e| tracing::error!("Failed to build SecurityContext from config: {e}"))
         .ok()?;
 
-    Some(AuthenticationResult {
-        security_context: ctx,
-    })
+    Some(AuthenticationResult::authenticated(ctx))
 }
 
 #[cfg(test)]
