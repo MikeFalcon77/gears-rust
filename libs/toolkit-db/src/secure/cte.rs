@@ -295,8 +295,64 @@ where
     /// is the caller's responsibility — getting it wrong changes which rows come
     /// back, but cannot cross a tenant boundary, because the CTE body never held
     /// another tenant's rows to begin with.
+    ///
+    /// # Do not join on a disjunction
+    ///
+    /// A join predicate of the form `outer.id = cte.a OR outer.id = cte.b` — the
+    /// natural way to say "either endpoint of an edge" when expanding a graph
+    /// frontier — reads as one condition but plans as two. `PostgreSQL` cannot
+    /// drive an index from two hashed subplans under an `OR` and falls back to a
+    /// sequential scan of the outer table: on 199k rows the same 11-row result
+    /// took 15.2 ms that way against 0.30 ms expressed as a single semi-join.
+    ///
+    /// Prefer one membership test over the union of the CTE's columns, through
+    /// [`filter`](Self::filter):
+    ///
+    /// ```rust,ignore
+    /// let endpoints = Query::select()
+    ///     .column(Alias::new("src_id"))
+    ///     .from(Alias::new("edges"))
+    ///     .to_owned()
+    ///     .union(UnionType::Distinct, Query::select()
+    ///         .column(Alias::new("dst_id"))
+    ///         .from(Alias::new("edges"))
+    ///         .to_owned())
+    ///     .to_owned();
+    ///
+    /// .filter(Condition::all().add(Expr::col(node::Column::Id).in_subquery(endpoints)))
+    /// ```
     pub fn join_cte(mut self, name: &'static str, on: Condition) -> Self {
         self.outer.join(JoinType::InnerJoin, Alias::new(name), on);
+        self
+    }
+
+    /// Narrow the outer query's projection to `columns`.
+    ///
+    /// Without this the outer query selects every column of `E`, and
+    /// [`all_as`](Self::all_as) discards the surplus only after the database has
+    /// read and shipped it. That is the difference between an index-only scan and
+    /// a heap visit per row: on a 199k-row table a hop returning 11 ids measured
+    /// 0.371 ms selecting all columns against 0.079 ms selecting the key alone,
+    /// and the gap widens with the width of the row -- a `jsonb` payload or a
+    /// full-text column is carried on every row that matches.
+    ///
+    /// Pair with [`all_as`](Self::all_as): after narrowing, the row no longer has
+    /// the shape of `E::Model`, so [`all`](Self::all) and [`one`](Self::one) would
+    /// fail to deserialize.
+    ///
+    /// Columns are taken as `E::Column` and rendered table-qualified. An
+    /// unqualified name would be ambiguous the moment a CTE joined by
+    /// [`join_cte`](Self::join_cte) carries a column of the same name — `id` being
+    /// the obvious case — and the database rejects the statement at execution
+    /// rather than at build time.
+    pub fn columns<I>(mut self, columns: I) -> Self
+    where
+        I: IntoIterator<Item = E::Column>,
+    {
+        self.outer.clear_selects();
+        for column in columns {
+            self.outer.column((E::default(), column));
+        }
         self
     }
 

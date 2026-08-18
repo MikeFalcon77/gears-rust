@@ -681,3 +681,64 @@ fn join_on_subtree_id() -> Condition {
             .equals((node::Entity, node::Column::Id)),
     )
 }
+
+/// Without `columns` the outer query selects every column of `E`, so a caller
+/// that only wants keys still pays for the whole row at the database. Narrowing
+/// has to reach the emitted SQL, not just the deserialized type.
+#[test]
+fn columns_narrows_the_outer_projection() {
+    let scope = tenant_scope(uuid::Uuid::new_v4());
+
+    for backend in BACKENDS {
+        let wide = scoped_nodes(&scope)
+            .with_ctes()
+            .cte::<item::Entity>("owned", |q| q)
+            .build_statement(backend)
+            .to_string();
+        assert!(
+            wide.contains("\"name\"") || wide.contains("`name`"),
+            "{backend:?}: expected the unnarrowed query to select every column: {wide}"
+        );
+
+        let narrow = scoped_nodes(&scope)
+            .with_ctes()
+            .cte::<item::Entity>("owned", |q| q)
+            .columns([node::Column::Id])
+            .build_statement(backend)
+            .to_string();
+
+        let outer = &narrow[narrow.find(") SELECT").expect("outer query")..];
+        assert!(
+            !outer.contains("name"),
+            "{backend:?}: the outer projection was not narrowed: {outer}"
+        );
+        assert!(
+            outer.contains("id"),
+            "{backend:?}: the requested column is missing: {outer}"
+        );
+    }
+}
+
+/// Narrowing must not drop the outer scope predicate: `clear_selects` touches the
+/// projection, and a regression that cleared more than that would be invisible in
+/// the returned rows but fatal for isolation.
+#[test]
+fn columns_keeps_the_outer_scope_predicate() {
+    let tenant = uuid::Uuid::new_v4();
+    let scope = tenant_scope(tenant);
+
+    for backend in BACKENDS {
+        let sql = scoped_nodes(&scope)
+            .with_ctes()
+            .cte::<item::Entity>("owned", |q| q)
+            .columns([node::Column::Id])
+            .build_statement(backend)
+            .to_string();
+
+        let outer = &sql[sql.find(") SELECT").expect("outer query")..];
+        assert!(
+            outer.contains("tenant_id"),
+            "{backend:?}: narrowing dropped the outer scope predicate: {outer}"
+        );
+    }
+}

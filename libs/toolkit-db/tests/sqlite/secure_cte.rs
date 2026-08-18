@@ -598,3 +598,59 @@ async fn distinct_collapses_rows_duplicated_by_the_cte_join() {
     assert_eq!(collapsed.len(), 1, "distinct() should collapse them to one");
     assert_eq!(collapsed[0].id, t.root);
 }
+
+#[tokio::test]
+async fn a_narrowed_projection_still_returns_only_the_scoped_tenant() {
+    #[derive(Debug, sea_orm::FromQueryResult)]
+    struct NodeId {
+        id: Uuid,
+    }
+
+    let tdb = TestDb::new("projection").await;
+    let conn = tdb.conn();
+
+    let tenant_a = Uuid::new_v4();
+    let tenant_b = Uuid::new_v4();
+    let scope_a = AccessScope::for_tenants(vec![tenant_a]);
+    let scope_b = AccessScope::for_tenants(vec![tenant_b]);
+
+    let a = seed_tree(&conn, &scope_a, tenant_a, "a").await;
+    seed_tree(&conn, &scope_b, tenant_b, "b").await;
+
+    // `columns` rewrites the outer SELECT list. The rows it returns must still be
+    // exactly the scoped ones -- a narrowing that also dropped the scope
+    // predicate would be invisible in the shape of the result.
+    let ids = node::Entity::find()
+        .secure()
+        .scope_with(&scope_a)
+        .with_ctes()
+        .cte::<node::Entity>("all_nodes", |q| q)
+        .join_cte("all_nodes", join_on_id("all_nodes"))
+        .columns([node::Column::Id])
+        .all_as::<NodeId>(&conn)
+        .await
+        .expect("narrowed cte query");
+
+    assert_eq!(ids.len(), 4, "tenant A seeded four nodes");
+    assert!(
+        ids.iter().any(|r| r.id == a.root),
+        "the seeded root is missing: {ids:?}"
+    );
+
+    // Every returned id belongs to tenant A. Checked against the other tenant's
+    // rows rather than by re-reading the same scope, so an unscoped outer query
+    // would fail here.
+    let b_ids: Vec<Uuid> = node::Entity::find()
+        .secure()
+        .scope_with(&scope_b)
+        .all(&conn)
+        .await
+        .expect("tenant b rows")
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert!(
+        ids.iter().all(|r| !b_ids.contains(&r.id)),
+        "narrowing leaked another tenant's rows: {ids:?}"
+    );
+}
