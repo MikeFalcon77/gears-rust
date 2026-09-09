@@ -100,6 +100,11 @@ pub enum ExporterKind {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Exporter {
+    /// Defaults to `otlp_grpc`, matching `extract_exporter_config`. Without a
+    /// default, overriding only the endpoint (e.g. via
+    /// `APP__OPENTELEMETRY__EXPORTER__ENDPOINT`) would fail to load because
+    /// `kind` would be missing from the partially-built map.
+    #[serde(default)]
     pub kind: ExporterKind,
     pub endpoint: Option<String>,
     pub headers: Option<HashMap<String, String>>,

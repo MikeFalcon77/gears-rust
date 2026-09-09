@@ -640,6 +640,12 @@ pub async fn run_oop_with_options(opts: OopRunOptions) -> Result<()> {
         info!("Gear runtime completed successfully");
     }
 
+    // Graceful shutdown - flush remaining telemetry. An OoP gear is a separate
+    // OS process owning its own global providers, so the in-process host's
+    // flush in `bootstrap::run` does not cover it.
+    #[cfg(feature = "otel")]
+    crate::bootstrap::run::tracing_shutdown();
+
     result
 }
 
