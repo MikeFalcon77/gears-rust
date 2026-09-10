@@ -33,6 +33,18 @@ impl OpenTelemetryConfig {
     pub fn metrics_exporter(&self) -> Option<&Exporter> {
         self.metrics.exporter.as_ref().or(self.exporter.as_ref())
     }
+    /// Whether JSON log records should carry top-level `trace_id` / `span_id`.
+    ///
+    /// Off unless explicitly enabled: resolving the span context costs a lookup
+    /// on every event.
+    #[must_use]
+    pub fn inject_trace_ids_into_logs(&self) -> bool {
+        self.tracing
+            .logs_correlation
+            .as_ref()
+            .and_then(|c| c.inject_trace_ids_into_logs)
+            .unwrap_or(false)
+    }
 }
 
 /// OpenTelemetry resource identity — attached to all traces and metrics.

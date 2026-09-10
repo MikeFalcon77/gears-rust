@@ -66,7 +66,7 @@ For a Datadog-backed local setup, see
 
 Logs go to stderr, and to rotating files when a `file:` sink is configured —
 both governed by the `logging:` block, which is separate from `opentelemetry:`.
-Emit JSON so a collector or agent can read them off the container's stdout:
+Emit JSON so a collector or agent can read them off the container's log stream:
 
 ```yaml
 logging:

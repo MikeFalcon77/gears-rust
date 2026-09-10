@@ -8,7 +8,7 @@ collector — there is no `/metrics` scrape endpoint and no vendor-specific
 exporter. Any OTLP-compatible backend works: the OpenTelemetry Collector,
 Jaeger, Uptrace, or the Datadog Agent.
 
-**Logs are not exported over OTLP.** They are written to stdout as JSON and
+**Logs are not exported over OTLP.** They are written to stderr as JSON and
 collected from there — see [Logs](#logs) below.
 
 ## Overview
@@ -144,9 +144,11 @@ opentelemetry:
   # A per-signal `exporter` block fully replaces this one.
   exporter:
     kind: "otlp_grpc"                 # otlp_grpc (4317) | otlp_http (4318)
-    endpoint: "http://127.0.0.1:4317"
+    endpoint: "http://127.0.0.1:4317" # plaintext only for a loopback collector
     timeout_ms: 5000
-    headers:                          # e.g. backend auth
+    # Backend auth. Credential-bearing headers require an https:// endpoint —
+    # over plaintext OTLP they travel in the clear to anything on the path.
+    headers:
       authorization: "Bearer token"
 
   tracing:
@@ -176,11 +178,27 @@ Each of `tracing` and `metrics` has its own `enabled` flag, defaulting to
 even install the W3C propagator. Every config shipped in `config/` has them off
 — enable them deliberately.
 
+### Migrating from the old `tracing:` block
+
+Before 2026-03 the settings lived in a top-level `tracing:` section. That form
+is no longer accepted: loading a config that still uses it fails with an error
+naming each key's new home. The same applies to `APP__TRACING__*` environment
+overrides, which are now `APP__OPENTELEMETRY__*`.
+
+| Old | New |
+|---|---|
+| `tracing.enabled` | `opentelemetry.tracing.enabled` |
+| `tracing.service_name` | `opentelemetry.resource.service_name` |
+| `tracing.resource` | `opentelemetry.resource.attributes` |
+| `tracing.metrics` | `opentelemetry.metrics` |
+| `tracing.exporter` | `opentelemetry.exporter`, or `opentelemetry.tracing.exporter` to override it for traces only |
+| `tracing.sampler`, `.propagation`, `.http`, `.logs_correlation` | `opentelemetry.tracing.*` |
+
 ### Not yet implemented
 
-`tracing.propagation`, `tracing.http`, and `tracing.logs_correlation` are
-accepted by the config parser but **read by no code**. W3C propagation is always
-on when tracing is enabled, regardless of `propagation.w3c_trace_context`.
+`tracing.propagation` and `tracing.http` are accepted by the config parser but
+**read by no code**. W3C propagation is always on when tracing is enabled,
+regardless of `propagation.w3c_trace_context`.
 
 ---
 
@@ -200,8 +218,9 @@ logging:
 ```
 
 The Datadog Agent's container log collection, or an OpenTelemetry Collector
-`filelog` receiver, then reads the container's stdout. Nothing needs to be
-enabled inside the process.
+`filelog` receiver, then reads the container's log stream — the runtime captures
+stderr and stdout together, so the console sink is picked up as it is. Nothing
+needs to be enabled inside the process.
 
 ### Correlating logs with traces
 

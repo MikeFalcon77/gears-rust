@@ -33,8 +33,8 @@ postgres:
 # DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT=0.0.0.0:4317). Set an explicit
 # URL instead to target a standalone collector Service.
 #
-# Logs are not exported over OTLP: they go to the pod's stdout as JSON and are
-# collected from there by the node agent.
+# Logs are not exported over OTLP: they go to the pod's stderr as JSON and are
+# collected from the container log stream by the node agent.
 observability:
   traces:
     enabled: false

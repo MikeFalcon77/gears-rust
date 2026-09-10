@@ -439,11 +439,15 @@ fn do_init_metrics_provider(otel_cfg: &OpenTelemetryConfig) -> anyhow::Result<()
 
     let provider = builder.build();
 
-    // Retain a handle for the shutdown flush before the global registry takes it.
-    if METER_PROVIDER.set(provider.clone()).is_err() {
-        tracing::debug!("meter provider handle already stored");
-    }
-    global::set_meter_provider(provider);
+    // Retain a handle for the shutdown flush, and register *that* handle
+    // globally. `METRICS_INIT` is checked before this function and set after
+    // it, so two concurrent first-callers both reach this point; storing one
+    // provider while registering the other would leave `shutdown_metrics`
+    // flushing an instrument-less provider and losing the live one's final
+    // interval. `get_or_init` makes the winner's provider the only one that is
+    // ever retained or registered; the loser's is dropped unused.
+    let installed = METER_PROVIDER.get_or_init(|| provider);
+    global::set_meter_provider(installed.clone());
     tracing::info!("OpenTelemetry metrics initialized successfully");
 
     Ok(())

@@ -7,8 +7,9 @@
 # (DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT=0.0.0.0:4317) and no separate
 # collector is needed.
 #
-# Logs are not sent over OTLP. Gears write JSON to stdout; collect them from
-# there (the Agent's container log collection, or a filelog receiver).
+# Logs are not sent over OTLP. Gears write JSON to stderr; collect them from the
+# container log stream (the Agent's container log collection, or a filelog
+# receiver).
 
 receivers:
   otlp:
