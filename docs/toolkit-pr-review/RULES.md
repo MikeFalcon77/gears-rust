@@ -4,8 +4,12 @@
 
 Not authoritative: each rule is defined in its owning module under
 `docs/toolkit-pr-review/rules/`, and that definition is the one the review applies.
-Each module is read by exactly one agent, so the module says where a rule is written
-down, not who applies it.
+Each module is read by exactly one agent, so the module says both where a rule is
+written down and who applies it.
+
+`RUST-ARCH-001` is the one exception: there is no `rules/architecture.md`. It is
+defined in `docs/toolkit-pr-review/agents/architecture.md`, the architecture agent's
+own guidance, because the single agent that applies it is also the only reader of it.
 
 52 rules across 7 modules.
 

@@ -237,8 +237,12 @@ can still anchor on a changed line.
 
 ### Step 3: Spawn parallel sub-agents
 
-Spawn the **agents listed in `context.json`'s `agents` array, plus exactly one `toolkit-pr-review-architecture`
-agent**, all in parallel in a single message.
+Spawn the **agents listed in `context.json`'s `agents` array**, all in parallel in a single message.
+
+That array already carries `architecture` alongside the six subject agents, so iterate it and spawn
+each entry once. Do not add a second `toolkit-pr-review-architecture` on top of it: the architecture
+pass runs exactly once, and a duplicate doubles its cost and produces the same findings twice, which
+the `(file, line, id)` pass in Step 4 then silently swallows.
 
 Pass to every agent:
 - The review target identity from context (PR number + repo, or branch + base branch)
@@ -331,21 +335,75 @@ Wait for all Agent calls to complete. For each result:
 3. Append valid findings to a combined list in agent order — errors, security, async, design, tests,
    toolkit — then the architecture agent's.
 
-Deduplicate in two passes:
+Deduplicate in three passes, **in this order**:
 
 1. Drop any finding where `(file, line, id)` duplicates an earlier one.
-2. Then collapse by `(file, line)` **regardless of `id`**: when two findings land on the same line,
-   keep the one with the highest severity and drop the rest. Posting both puts two comments on one
-   line. If the surviving comment does not mention what the dropped one covered, extend it in a
-   sentence rather than keeping a second comment.
+2. **PR mode only:** drop any finding that repeats a comment already on the pull request.
+3. Then collapse by `(file, line)` **regardless of `id`** — but only when the findings describe the
+   **same defect**. Two defects that happen to share a line both survive.
 
-Every agent sees every file, so cross-agent collisions on one line are now routine rather than rare:
-two modules genuinely firing on the same line is the common case, and the second pass is what keeps
-that from becoming two comments. Measured on five PRs, roughly 6% of findings collided this way.
+The order matters, and pass 2 must run before pass 3. Measured on PR 4785, one collapse group
+(`service.rs:87`) held three findings: a duplicate of an existing comment, a duplicate of another
+existing comment, and one novel finding. Collapsing first kept the duplicate, because severity was
+tied and it came earlier in agent order, and dropped the only finding worth posting. Removing the
+duplicates first leaves the novel one to win its own group.
 
-A caveat the collapse does not handle: two agents describing the **same** defect one line apart
-(`runner.rs:352` and `:353`) survive as two findings, because the key is exact. When two adjacent
-findings clearly describe one defect, keep the more severe and fold the other in by hand.
+#### Pass 2: findings already covered by a comment on the PR
+
+A PR under review has usually been reviewed before — by a human, by another bot, or by an earlier
+run of this tool. Posting the same finding again wastes the author's attention and buries whatever
+is new. Fetch the existing top-level comments first:
+
+```bash
+gh api --paginate "repos/$REPO/pulls/<PR_NUMBER>/comments?per_page=100" \
+  --jq '.[] | select(.in_reply_to_id==null) | "\(.path):\(.line) \(.body | split("\n")[0])"'
+```
+
+`select(.in_reply_to_id==null)` matters: thread replies, `**RESOLVED**` follow-ups and answers from
+the author are not findings, and counting them inflates the list several-fold.
+
+**Match by topic, not by line number.** On PR 4747 the existing review was written against an
+earlier commit, so line numbers had moved: 2 of 20 findings matched an existing comment positionally
+while reading the headlines put 10 of them on a defect already reported. Across PRs 4785, 4747 and
+4711 (80 findings) 40% matched an existing comment on the exact line and 51% within two lines, so a
+positional check is a useful first cut and a bad last word. Read the first line of each existing
+comment — it is the headline — and drop a finding when the defect is the same, wherever it is
+anchored.
+
+A finding that a resolved comment covered still gets dropped: the author has already seen it. If the
+code shows it was not actually fixed, that is worth posting, but say so rather than restating the
+original.
+
+#### Pass 3: two findings on one line
+
+Every agent sees every file, so collisions on one line are routine. Across the same three PRs, 22 of
+80 findings (27.5%) landed on a line another finding already held.
+
+Collapsing all of them is wrong. Of those 22, 10 described a **different** defect than the finding
+that would have survived — 12.5% of every finding produced. On `oop.rs:196` in PR 4711 three agents
+fired on one line with three unrelated defects: the master's OTLP credentials reaching gear-visible
+config, log identity falling back to local config, and the branch having no test. A single comment
+cannot carry all three, and two of them are not a wording variant of the third.
+
+So:
+
+- **Same defect** — keep the highest severity, drop the rest. If the survivor does not mention what
+  a dropped one covered, extend it in a sentence.
+- **Different defects** — keep both, and post both as separate comments on that line. GitHub allows
+  it. Human reviewers in this repo do it: 10 of 281 real top-level comments across ten PRs sit on a
+  line that already had one, and on PR 4747 two such comments were both substantive and the author
+  fixed both.
+
+Judge this on the `issue` field, which states the defect. Two findings whose `issue` lines would
+take different fixes are different defects. Cap it at two comments per line — beyond that the line
+is telling you the change itself is doing too much, which is `RUST-ARCH-001` territory, not four
+comments.
+
+A caveat none of the passes handle: two agents describing the **same** defect one line apart
+(`runner.rs:352` and `:353`) survive as two findings, because the key is exact. This is common
+against a prior review as well — on PR 4711 a finding on `logging.rs:117` restated an existing
+comment on `:118`. When two adjacent findings clearly describe one defect, keep the more severe and
+fold the other in by hand.
 
 Apply filter rules:
 - Drop any finding whose `id` is not in the emitting agent's row of the routing table. An agent

@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+from urllib.parse import quote
 
 
 class SourceError(RuntimeError):
@@ -95,7 +96,8 @@ def read_blob_git(sha: str, path: str) -> bytes | None:
 
 def read_blob_api(repo: str, sha: str, path: str) -> bytes | None:
     p = subprocess.run(
-        ["gh", "api", f"repos/{repo}/contents/{path}?ref={sha}", "-q", ".content"],
+        ["gh", "api", f"repos/{repo}/contents/{quote(path, safe='/')}?ref={sha}",
+         "-q", ".content"],
         capture_output=True, text=True,
     )
     if p.returncode != 0 or not p.stdout.strip():

@@ -369,6 +369,15 @@ class TestPrepareOffline(unittest.TestCase):
                          "a deleted file has no RIGHT side at all")
         self.assertEqual(gone["ranges"]["left"], [[1, 3]])
 
+        # Git quotes a header path holding a non-ASCII byte. The header regex used to
+        # anchor on a literal `a/`, so this file matched nothing and left the review
+        # without a warning.
+        quoted = f["gears/foo/src/fr\u00fch.rs"]
+        self.assertEqual(quoted["status"], "modified")
+        self.assertEqual(quoted["ranges"]["right"], [[3, 3]])
+        self.assertIn("gears/foo/src/fr\u00fch.rs", ctx["all_files"],
+                      "a quoted-path file stays in review scope")
+
         added = f["gears/foo/src/added.rs"]
         self.assertEqual(added["status"], "added")
         self.assertEqual(added["ranges"]["right"], [[1, 2]])

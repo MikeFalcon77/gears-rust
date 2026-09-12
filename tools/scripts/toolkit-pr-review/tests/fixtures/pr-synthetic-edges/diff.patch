@@ -48,3 +48,11 @@ index 9999999..aaaaaaa 100644
  source = "registry+https://github.com/rust-lang/crates.io-index"
  dependencies = []
 +checksum = "deadbeef"
+diff --git "a/gears/foo/src/fr\303\274h.rs" "b/gears/foo/src/fr\303\274h.rs"
+index 1111111..2222222 100644
+--- "a/gears/foo/src/fr\303\274h.rs"
++++ "b/gears/foo/src/fr\303\274h.rs"
+@@ -1,2 +1,3 @@
+ fn early() {}
+ 
++fn late() {}

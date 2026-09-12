@@ -60,6 +60,10 @@ RULES_SRC = Path(__file__).resolve().parents[3] / "docs/toolkit-pr-review/rules"
 RULES_OUT = Path(__file__).resolve().parents[3] / "docs/toolkit-pr-review/agent-rules"
 TOOLCHAIN = Path(__file__).resolve().parents[3] / "rust-toolchain.toml"
 
+# RUST-DEP-001 compares these two against each other, so when a PR changes one the
+# other is snapshotted as read-only context. See the counterpart block in `prepare`.
+ADVISORY_PAIR = ("deny.toml", ".cargo/audit.toml")
+
 WHY = re.compile(r"^\s+why:")
 # A version gate at the very end of a line gates the whole criterion. When prose follows
 # the marker ("`Requires Rust >= 1.98` for the derive fast path that exposes it") the gate
@@ -200,6 +204,16 @@ def cmd_prepare(args: argparse.Namespace) -> int:
                 content = ghsource.read_blob_api(repo, ref, path)
                 if content is not None:
                     blob_source = "contents-api"
+            if content is None:
+                # Both readers failed for a file the contract says to snapshot. Carrying
+                # on leaves snapshot=None, which an agent cannot tell apart from a file
+                # that is deliberately never snapshotted, so it reviews the diff alone
+                # and nothing says the source was missing. Offline runs and files in
+                # NEVER_SNAPSHOT do not reach here.
+                raise ghsource.SourceError(
+                    f"no snapshot for {path} at {ref}: neither the local object database "
+                    f"nor the contents API returned it"
+                )
         rec: dict = {
             "status": fd.status,
             "old_path": fd.old_path,
@@ -225,6 +239,26 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         diff_bytes = len(fd.text().encode())
         rec["est_tokens"] = budget.est_tokens(rec["bytes"] + diff_bytes)
         files[path] = rec
+
+    # --- advisory counterpart -------------------------------------------------------
+    # RUST-DEP-001 asks whether `.cargo/audit.toml` and `deny.toml` have drifted apart,
+    # an advisory accepted in one but not the other. When the PR touches only one of
+    # them the other is not in the diff, so the agent had nothing to compare against and
+    # the criterion could not fire. Snapshot the counterpart as read-only context: no
+    # `context.json` entry, so it stays out of `all_files` and `manifest_files` and has
+    # no `ranges.right`, and a finding still anchors on the file the PR actually changed.
+    # A counterpart that is absent from the repo leaves nothing under `files/`, which is
+    # correct: there is nothing to drift from.
+    if not offline and head_sha:
+        for present, missing in (ADVISORY_PAIR, ADVISORY_PAIR[::-1]):
+            if present in files and missing not in files:
+                extra = ghsource.read_blob_git(head_sha, missing)
+                if extra is None:
+                    extra = ghsource.read_blob_api(repo, head_sha, missing)
+                if extra is not None:
+                    target = _snapshot_path(work, missing)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(extra)
 
     # --- agents -------------------------------------------------------------------
     # One agent per rule module, each reading the whole diff. The two narrow modules get

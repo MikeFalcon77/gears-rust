@@ -26,7 +26,49 @@ import re
 from dataclasses import dataclass, field
 
 HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-GIT_HEADER_RE = re.compile(r"^diff --git a/(.+?) b/(.+)$")
+# Git quotes a path in the header as soon as it holds a byte outside plain ASCII, a
+# quote or a backslash, writing `diff --git "a/f\303\274.rs" "b/f\303\274.rs"` with
+# C-style escapes. The unquoted alternative anchored on a literal `a/`, so a quoted
+# header matched nothing, the file never became a FileDiff and it dropped out of the
+# review with no warning. Each side is quoted independently, so both forms can appear
+# on one line.
+GIT_HEADER_RE = re.compile(
+    r'^diff --git (?:"a/((?:[^"\\]|\\.)*)"|a/(.+?)) (?:"b/((?:[^"\\]|\\.)*)"|b/(.+))$'
+)
+
+_ESCAPES = {
+    "a": 0x07, "b": 0x08, "t": 0x09, "n": 0x0A,
+    "v": 0x0B, "f": 0x0C, "r": 0x0D, '"': 0x22, "\\": 0x5C,
+}
+
+
+def unquote_path(text: str) -> str:
+    """Decode the C-style escaping git uses for a quoted path in a diff header.
+
+    Octal escapes carry raw bytes, so they are collected as bytes and decoded as UTF-8
+    at the end; decoding each one alone would mangle every multi-byte character.
+    """
+    out = bytearray()
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch != "\\":
+            out.extend(ch.encode("utf-8"))
+            i += 1
+            continue
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if nxt in _ESCAPES:
+            out.append(_ESCAPES[nxt])
+            i += 2
+        elif nxt.isdigit():
+            octal = text[i + 1:i + 4]
+            out.append(int(octal, 8) & 0xFF)
+            i += 1 + len(octal)
+        else:
+            # Not an escape git produces; keep the backslash as written.
+            out.extend(ch.encode("utf-8"))
+            i += 1
+    return out.decode("utf-8", "replace")
 
 Range = tuple[int, int]
 
@@ -93,7 +135,9 @@ def parse(text: str) -> dict[str, FileDiff]:
         m = GIT_HEADER_RE.match(line)
         if m:
             flush()
-            a_path, b_path = m.group(1), m.group(2)
+            a_quoted, a_plain, b_quoted, b_plain = m.groups()
+            a_path = unquote_path(a_quoted) if a_quoted is not None else a_plain
+            b_path = unquote_path(b_quoted) if b_quoted is not None else b_plain
             # b/ is the head-side path; for a pure deletion git still prints it, and the
             # `+++ /dev/null` line below is what marks the file as gone.
             cur = FileDiff(path=b_path, lines=[raw])

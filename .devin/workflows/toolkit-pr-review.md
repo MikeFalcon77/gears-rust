@@ -161,7 +161,7 @@ is the design this replaced. Then do the architecture pass from
 ```bash
 export PR_NUMBER=<PR_NUMBER>
 python3 - << 'PY'
-import json, glob, sys, os
+import json, glob, sys, os, subprocess
 
 PR_NUMBER = os.environ["PR_NUMBER"]
 ctx = json.load(open(f"/tmp/toolkit-pr-review-{PR_NUMBER}/context.json"))
@@ -225,8 +225,14 @@ def speculative(f):
 # Deduplicate by (file, line, id), validate line in diff.
 # A finding on a fully deleted file has no line at all (it posts as a
 # file-level comment in Step 5) and skips the line check entirely.
-seen, filtered = set(), []
+seen, filtered, malformed = set(), [], 0
 for f in combined:
+    # An agent writes this JSON, so a record can arrive without the fields the key is
+    # built from. Indexing straight into it raised KeyError and killed the whole merge,
+    # losing every finding after the bad one; drop the record and keep going instead.
+    if not isinstance(f, dict) or not f.get("file") or not f.get("id"):
+        malformed += 1
+        continue
     key = (f["file"], f.get("line"), f["id"])
     if key in seen:
         continue
@@ -241,25 +247,88 @@ for f in combined:
         continue
     seen.add(key)
     filtered.append(f)
+if malformed:
+    print(f"WARNING: dropped {malformed} findings missing a file or id", file=sys.stderr)
 
-# Second pass: two findings on the same line describe the same defect from two angles.
-# Posting both puts two comments on one line, so keep only the highest-severity one.
-# Every agent sees every file, so two modules firing on one line is routine: about 6% of
-# findings collided this way across five measured PRs. Lineless findings are left alone.
+RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+
+# Second pass: drop what the PR already carries a comment about. A PR under review has
+# usually been reviewed before -- by a human, by another bot, or by an earlier run of
+# this tool -- and reposting buries whatever is new. Only top-level comments count:
+# thread replies and RESOLVED follow-ups are not findings.
+#
+# This runs BEFORE the same-line collapse, and the order is load-bearing. On PR 4785 one
+# collapse group held two duplicates of existing comments and one novel finding; with the
+# collapse first a duplicate won the severity tie on agent order and the only finding
+# worth posting was dropped.
+#
+# Line numbers are a first cut, not the last word: on PR 4747 the existing review was
+# written against an earlier commit, so 2 of 20 findings matched positionally while 10
+# were the same defect at a shifted line. Anything this leaves behind is caught by the
+# topic read in the checklist below.
+existing = []
+try:
+    raw = subprocess.run(
+        ["gh", "api", "--paginate",
+         f"repos/{ctx['repo']}/pulls/{PR_NUMBER}/comments?per_page=100",
+         "--jq", '.[] | select(.in_reply_to_id==null) | {path, line, head: (.body | split("\n")[0])}'],
+        capture_output=True, text=True, check=False)
+    existing = [json.loads(l) for l in raw.stdout.splitlines() if l.strip()]
+except Exception as e:
+    print(f"WARNING: could not read existing PR comments: {e}", file=sys.stderr)
+
+already = {(c.get("path"), c.get("line")) for c in existing}
+before = len(filtered)
+filtered = [f for f in filtered if (f["file"], f.get("line")) not in already]
+if existing:
+    print(f"{len(existing)} comments already on the PR; dropped {before - len(filtered)} "
+          f"findings on those exact lines.", file=sys.stderr)
+    print("REVIEW BY TOPIC before posting: a finding whose defect an existing comment "
+          "already names must be dropped even when the line differs.", file=sys.stderr)
+    for c in existing:
+        print(f"  existing: {c.get('path')}:{c.get('line')} {c.get('head','')[:100]}",
+              file=sys.stderr)
+
+# Third pass: two findings on one line. Collapsing every collision is wrong -- across PRs
+# 4785, 4747 and 4711 (80 findings) 22 landed on an occupied line and 10 of those were a
+# different defect than the survivor, so a flat collapse discarded 12.5% of all findings.
+# Group on `issue` as well, so equivalent findings still collapse to the highest severity
+# while distinct defects on one line both survive. GitHub accepts two comments on a line
+# and human reviewers here post them. Lineless findings are left alone.
+#
 # Known gap: the key is exact, so one defect reported a line apart by two agents survives
 # as two findings and has to be folded by hand.
-RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+def issue_key(f):
+    return " ".join((f.get("issue") or "").lower().split())
+
 best = {}
 collapsed = []
 for f in filtered:
     if f.get("line") is None:
         collapsed.append(f)
         continue
-    k = (f["file"], f["line"])
+    k = (f["file"], f["line"], issue_key(f))
     if k not in best or RANK.get(f["severity"], 4) < RANK.get(best[k]["severity"], 4):
         best[k] = f
 collapsed.extend(best.values())
 filtered = collapsed
+
+# Two distinct defects on one line both post; beyond that the line is telling you the
+# change is doing too much, which is RUST-ARCH-001 territory rather than four comments.
+per_line = {}
+for f in filtered:
+    per_line.setdefault((f["file"], f.get("line")), []).append(f)
+
+capped = []
+for (path, line), group in per_line.items():
+    if line is None or len(group) <= 2:
+        capped.extend(group)
+        continue
+    group.sort(key=lambda x: RANK.get(x["severity"], 4))
+    print(f"WARNING: {len(group)} findings on {path}:{line}; keeping the 2 most severe",
+          file=sys.stderr)
+    capped.extend(group[:2])
+filtered = capped
 
 # Sort CRITICAL > HIGH > MEDIUM > LOW
 order_map = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}

@@ -29,7 +29,10 @@ so omit `line` and `side` entirely rather than guessing.
 
 ## Check IDs to Apply
 
-Apply **only** to test functions and test modules visible in the diff, and apply **only** these specific check IDs:
+Apply **only** these specific check IDs. The two scopes above still hold and they are not the same:
+`RUST-TEST-001` reads the **production** code the PR changed and asks whether a test exists for it,
+so it fires on a file with no test code in it at all; `TEST-QUALITY-1` through `TEST-QUALITY-10`
+apply only to test functions and test modules visible in the diff.
 
 ### RUST-TEST-001 — Test Coverage
 **Severity**: HIGH
