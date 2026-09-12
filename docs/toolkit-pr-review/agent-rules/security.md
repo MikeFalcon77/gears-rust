@@ -30,14 +30,14 @@ finding; do not infer it from the example in the Output Contract.
 ### 1. RUST-SEC-001 — Security and Boundary Validation
 **Severity**: CRITICAL
 
-- External input validated at boundaries: query parameters, request bodies, file uploads, API calls, **and config**. Config boundaries are a real source of this finding and are easy to forget
+- [HIGH] External input validated at boundaries: query parameters, request bodies, file uploads, API calls, **and config**. Config boundaries are a real source of this finding and are easy to forget
 - Authorization and tenant/resource scoping enforced where applicable — an endpoint must verify the caller can access the resource
 - Secrets, tokens and sensitive identifiers never logged, stored in plain text, or embedded in error messages
 - **Path, command, SQL, serialization and deserialization boundaries treated as hostile.** All five: path traversal and unsafe deserialization are as much in scope as SQL
-- **Dangerous defaults are not silently accepted**
-- **Security checks implemented too deep or too late** — authorization applied inside the repository layer instead of at the handler is an architectural security defect
-- Implicit trust in upstream data without validation
-- Internal details (stack traces, file paths, SQL text, dependency versions) leaked in error responses to external callers
+- [HIGH] **Dangerous defaults are not silently accepted**
+- [HIGH] **Security checks implemented too deep or too late** — authorization applied inside the repository layer instead of at the handler is an architectural security defect
+- [HIGH] Implicit trust in upstream data without validation
+- [HIGH] Internal details (stack traces, file paths, SQL text, dependency versions) leaked in error responses to external callers
 - Security-sensitive randomness (tokens, session IDs, nonces) must use a CSPRNG — **`OsRng` or `getrandom`, never `rand::thread_rng()`** or a seeded PRNG
 - Outbound requests built from user-supplied URLs or hosts with no SSRF guard before the request is issued. Destination validation or allowlisting alone is not enough — check for:
   - internal and link-local ranges blocked (`127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `::1`, `fe80::/10`), since the cloud metadata endpoint lives there
@@ -46,10 +46,10 @@ finding; do not infer it from the example in the Output Contract.
   - the allowlist applied to the **resolved** address, not just the hostname, or DNS rebinding defeats it
 - Hardcoded secrets, API keys, passwords or tokens committed literally in the diff
 - Disabled or weakened TLS certificate validation, a TLS floor below 1.2, or mTLS that validates the client chain without checking CN/SAN — an accepted chain with no name check is not authentication
-- Every string input needs an explicit maximum length enforced before it is processed
-- Validation patterns must be allowlists, not denylists
-- An unvalidated identifier `format!`-interpolated into an outbound API path or URL; **validate the charset first**
-- A secret held in a plain `String` rather than wrapped (`secrecy::Secret<String>`), so it neither zeroizes on drop nor redacts in `Debug`/`Display`. A plain field leaks through any `{:?}` log line
+- [HIGH] Every string input needs an explicit maximum length enforced before it is processed
+- [HIGH] Validation patterns must be allowlists, not denylists
+- [HIGH] An unvalidated identifier `format!`-interpolated into an outbound API path or URL; **validate the charset first**
+- [HIGH] A secret held in a plain `String` rather than wrapped (`secrecy::Secret<String>`), so it neither zeroizes on drop nor redacts in `Debug`/`Display`. A plain field leaks through any `{:?}` log line
 
 ### 2. RUST-SEC-002 — HTTP Response Security Headers and Fingerprint Suppression
 **Severity**: HIGH

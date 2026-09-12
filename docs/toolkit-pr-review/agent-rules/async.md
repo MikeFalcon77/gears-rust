@@ -20,15 +20,15 @@ finding; do not infer it from the example in the Output Contract.
 ### 1. RUST-ASYNC-001 — Async Code Is Runtime-Safe
 **Severity**: CRITICAL
 
-- No blocking I/O or long CPU-bound work on an executor thread without offloading: `std::thread::sleep`, `File::read`, `TcpStream::read`, CPU-heavy work with no `spawn_blocking`
+- [HIGH] No blocking I/O or long CPU-bound work on an executor thread without offloading: `std::thread::sleep`, `File::read`, `TcpStream::read`, CPU-heavy work with no `spawn_blocking`
 - `.await` while holding a lock, unless the design explicitly requires and justifies it. Never prescribe `tokio::sync::Mutex` as the fix
 - **No timeout on an operation that can hang indefinitely**: HTTP, database, gRPC, a channel receive with no deadline
-- **Retries that are not bounded and observable.** A retry loop needs a cap, backoff with jitter, and logging. Flag loops that can retry forever, retry without jitter, or retry silently
-- **Background tasks with no lifecycle control or error handling**, in particular a `tokio::spawn` whose `JoinHandle` is dropped
+- [HIGH] **Retries that are not bounded and observable.** A retry loop needs a cap, backoff with jitter, and logging. Flag loops that can retry forever, retry without jitter, or retry silently
+- [HIGH] **Background tasks with no lifecycle control or error handling**, in particular a `tokio::spawn` whose `JoinHandle` is dropped
 - A function holding partial or shared state across `.await` with no auditable cancel-safety story
-- `Drop` cannot `.await`. Audit `Drop` impls on async-held resources (transactions, connections, guards) for cleanup that actually needs an async call; it must be explicit, not assumed to run via `Drop`
-- CPU-bound async loops with no periodic `tokio::task::yield_now()`, starving other tasks on the same executor thread
-- An async fn reachable from `select!`, `timeout`, or an abortable task with no `// cancel-safe:` or `// NOT cancel-safe:` comment
+- [HIGH] `Drop` cannot `.await`. Audit `Drop` impls on async-held resources (transactions, connections, guards) for cleanup that actually needs an async call; it must be explicit, not assumed to run via `Drop`
+- [HIGH] CPU-bound async loops with no periodic `tokio::task::yield_now()`, starving other tasks on the same executor thread
+- [MEDIUM] An async fn reachable from `select!`, `timeout`, or an abortable task with no `// cancel-safe:` or `// NOT cancel-safe:` comment
 - A lock guard that escapes: returned from a helper, stored in a struct field, or produced by `MutexGuard::map`. `Enforcement: clippy await_holding_lock, await_holding_refcell_ref (deny)` for the direct shape only
 
 ### 2. RUST-CONC-001 — Shared State and Concurrency Are Well Designed

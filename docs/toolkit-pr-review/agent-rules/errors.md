@@ -20,16 +20,16 @@ finding; do not infer it from the example in the Output Contract.
 ### 1. RUST-ERR-001 — Error Handling Is Explicit and Useful
 **Severity**: CRITICAL
 
-- Fallible operations return `Result` where failure is expected, not `Option`, a sentinel value, or a bare `bool`
-- Error context is preserved. Flag `map_err(|_| ...)` that discards the source error
+- [HIGH] Fallible operations return `Result` where failure is expected, not `Option`, a sentinel value, or a bare `bool`
+- [HIGH] Error context is preserved. Flag `map_err(|_| ...)` that discards the source error
 - Errors are not swallowed **or silently downgraded** — a CRITICAL condition turned into a logged warning, or a typed error collapsed into `Option`, is a finding
-- Error messages are actionable
-- Domain errors are distinguishable where that matters. Reusing one generic variant for distinct domain conditions breaks pattern matching by callers
-- The code does not rely on logs alone instead of returning errors
-- Generic error wrapping that hides the root cause **without reason**. Deliberate, justified wrapping is fine; the finding is unexplained loss of the cause
-- Ad hoc stringification (`.map_err(|e| MyError::Other(e.to_string()))`) where propagation with context belongs. This is the most common shape of this rule in practice
+- [MEDIUM] Error messages are actionable
+- [HIGH] Domain errors are distinguishable where that matters. Reusing one generic variant for distinct domain conditions breaks pattern matching by callers
+- [HIGH] The code does not rely on logs alone instead of returning errors
+- [MEDIUM] Generic error wrapping that hides the root cause **without reason**. Deliberate, justified wrapping is fine; the finding is unexplained loss of the cause
+- [MEDIUM] Ad hoc stringification (`.map_err(|e| MyError::Other(e.to_string()))`) where propagation with context belongs. This is the most common shape of this rule in practice
 - `From` used for a conversion that can fail — a `From` impl that panics or silently coerces on bad input is a correctness bug. Use `TryFrom`
-- A large error payload returned unboxed, or `Result<_, ()>` from an async signature. The rule holds on any toolchain; only the lint coverage on `async fn` is new. `Requires Clippy >= 1.98`
+- [MEDIUM] A large error payload returned unboxed, or `Result<_, ()>` from an async signature. The rule holds on any toolchain; only the lint coverage on `async fn` is new. `Requires Clippy >= 1.98`
 
 ### 2. RUST-PANIC-001 — Panic Safety
 **Severity**: HIGH
@@ -64,10 +64,10 @@ finding.
 
 - No ignored `Result` for a fallible operation without justification
 - **`let _ = ...` on a meaningful failure**, unless explicitly intentional and documented
-- No empty error handlers (`_ => { }`)
+- [HIGH] No empty error handlers (`_ => { }`)
 - **No failure path that only logs and continues** where correctness requires propagation or a state change
-- No `iter.by_ref().peekable().peek()` — it silently consumes and discards an item. Bind the `Peekable` or call `.next()`. `Requires Clippy >= 1.98`
-- No `mem::forget` on a type with a `Drop` impl; almost always a leak bug rather than an intentional leak
+- [HIGH] No `iter.by_ref().peekable().peek()` — it silently consumes and discards an item. Bind the `Peekable` or call `.next()`. `Requires Clippy >= 1.98`
+- [HIGH] No `mem::forget` on a type with a `Drop` impl; almost always a leak bug rather than an intentional leak
 
 ### 5. RUST-NO-003 — No Panic-Driven Control Flow
 **Severity**: HIGH
