@@ -51,7 +51,11 @@ where
 {
     let mut last: Option<E> = None;
 
-    for attempt in 0..=policy.max_attempts {
+    // At least one attempt: a policy of zero would otherwise leave the loop
+    // with no error to return.
+    let attempts = policy.max_attempts.max(1);
+
+    for attempt in 0..attempts {
         match op().await {
             Ok(value) => return Ok(value),
             Err(e) => {
@@ -62,7 +66,11 @@ where
             }
         }
 
-        tokio::time::sleep(policy.delay_for(attempt)).await;
+        // Nothing follows the final attempt, so sleeping after it only delays
+        // the error the caller is already getting.
+        if attempt + 1 < attempts {
+            tokio::time::sleep(policy.delay_for(attempt)).await;
+        }
     }
 
     Err(last.expect("at least one attempt was made"))
@@ -88,6 +96,24 @@ mod tests {
 
         assert_eq!(out, Ok(7));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failing_call_is_attempted_exactly_max_attempts_times() {
+        let calls = AtomicU32::new(0);
+        let policy = BackoffPolicy {
+            base: Duration::from_millis(1),
+            max_delay: Duration::from_millis(1),
+            max_attempts: 3,
+        };
+        let out: Result<u32, ()> = retry_with_backoff(policy, |_| true, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err(()) }
+        })
+        .await;
+
+        assert_eq!(out, Err(()));
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 
     #[test]
