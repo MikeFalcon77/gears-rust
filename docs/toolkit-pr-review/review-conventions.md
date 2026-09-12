@@ -9,8 +9,8 @@ purpose: Cross-cutting rules every review sub-agent follows, regardless of which
 
 Read this before emitting findings. It holds what is common to every sub-agent: how severity is
 assigned, what the inline markers on a criterion mean, and what discipline applies to reporting.
-The checks themselves live in each agent's own prompt under `docs/pr-review/agents/`, and the
-wording of a comment is governed by `docs/pr-review/comment-style.md`.
+The checks themselves live in each agent's own prompt under `docs/toolkit-pr-review/agents/`, and the
+wording of a comment is governed by `docs/toolkit-pr-review/comment-style.md`.
 
 ## Severity
 
@@ -107,6 +107,6 @@ finding, if the fact that it is there is itself a problem.
 
 ## Wording
 
-`docs/pr-review/comment-style.md` is the contract for how a comment is phrased, including which
+`docs/toolkit-pr-review/comment-style.md` is the contract for how a comment is phrased, including which
 phrasings are banned and how to keep a finding's uncertainty intact. Read it before emitting
 findings; its rules are deliberately not restated here so that the two cannot drift.
