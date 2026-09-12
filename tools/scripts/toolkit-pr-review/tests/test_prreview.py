@@ -21,12 +21,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent
+ROOT = SCRIPTS.parents[2]
 FIXTURES = HERE / "fixtures"
 sys.path.insert(0, str(SCRIPTS))
 
 import classify      # noqa: E402
 import diffparse     # noqa: E402
 import budget        # noqa: E402
+import lint          # noqa: E402
 
 FIXTURE_PRS = sorted(p.name for p in FIXTURES.iterdir() if p.is_dir()) if FIXTURES.exists() else []
 
@@ -150,6 +152,71 @@ class TestClassify(unittest.TestCase):
         self.assertTrue(classify.toolkit_owned("other/x.rs", "let c: SecureConn = ...;"))
         self.assertFalse(classify.toolkit_owned("other/x.rs", "fn main() {}"))
         self.assertFalse(classify.toolkit_owned("Cargo.toml", None))
+
+
+class TestSeverityMarker(unittest.TestCase):
+    """Criterion-level severity: `- [LEVEL] ...` overrides the rule's `**Severity**`.
+
+    Severity is declared per rule and inherited by every criterion under it, so one label ranks
+    a whole family: 22 criteria inherit CRITICAL from RUST-SEC-001, which spans both a leaked
+    token and a config field with no length cap. The marker is the escape hatch.
+    """
+
+    def test_marker_matches_every_level(self):
+        for lvl in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+            m = lint.SEVERITY_MARKER.match(f"[{lvl}] some trigger text")
+            self.assertIsNotNone(m, lvl)
+            self.assertEqual(m.group(1), lvl)
+            self.assertEqual(m.group(2), "some trigger text")
+
+    def test_marker_needs_the_whole_word_and_a_trigger(self):
+        for bad in ("[CRIT] x", "[Critical] x", "[HIGH]", "[HIGH]x", "text [HIGH] mid-line"):
+            self.assertIsNone(lint.SEVERITY_MARKER.match(bad), bad)
+
+    def test_a_markdown_checkbox_is_not_a_severity_marker(self):
+        """`- [ ]` and `- [x]` must not be read as a malformed level."""
+        for box in ("[ ] todo", "[x] done"):
+            self.assertIsNone(lint.SEVERITY_MARKER.match(box), box)
+            self.assertIsNone(re.match(r"^\[([A-Za-z]{2,})\]\s", box), box)
+
+    def test_an_invalid_level_is_caught_as_a_typo(self):
+        """The check that fires on `[BLOCKER]`: the intent is lost silently otherwise."""
+        for typo in ("[BLOCKER] x", "[CRIT] x", "[Critical] x"):
+            self.assertIsNone(lint.SEVERITY_MARKER.match(typo))
+            self.assertIsNotNone(re.match(r"^\[([A-Za-z]{2,})\]\s", typo), typo)
+
+    def test_the_live_corpus_has_no_invalid_markers(self):
+        for path in sorted((ROOT / "docs/toolkit-pr-review/rules").glob("*.md")):
+            for n, body in lint.criteria_of(path.read_text(encoding="utf-8")):
+                bad = re.match(r"^\[([A-Za-z]{2,})\]\s", body)
+                if bad:
+                    self.assertIn(bad.group(1), lint.SEVERITIES,
+                                  f"{path.name}:{n} has a non-severity bracket marker")
+
+    def test_markers_survive_rendering(self):
+        """render-rules strips rationale and gated criteria; it must not eat the marker."""
+        src = ROOT / "docs/toolkit-pr-review/rules"
+        out = ROOT / "docs/toolkit-pr-review/agent-rules"
+        for path in sorted(src.glob("*.md")):
+            rendered = out / path.name
+            if not rendered.exists():
+                continue
+            kept = {b for _, b in lint.criteria_of(rendered.read_text(encoding="utf-8"))
+                    if lint.SEVERITY_MARKER.match(b)}
+            for _, body in lint.criteria_of(path.read_text(encoding="utf-8")):
+                m = lint.SEVERITY_MARKER.match(body)
+                # a marked criterion is either dropped by a version gate or kept verbatim
+                if m and body in {b for _, b in lint.criteria_of(rendered.read_text(encoding="utf-8"))}:
+                    self.assertIn(body, kept)
+
+    def test_conventions_and_the_agent_prompt_both_document_the_override(self):
+        """An undocumented marker is inert: the agent reads the rule's level and moves on."""
+        conv = (ROOT / "docs/toolkit-pr-review/review-conventions.md").read_text(encoding="utf-8")
+        subj = (ROOT / "docs/toolkit-pr-review/agents/subject.md").read_text(encoding="utf-8")
+        self.assertIn("[MEDIUM]", conv)
+        self.assertIn("override", conv.lower())
+        self.assertIn("[MEDIUM]", subj)
+        self.assertIn("wins over the rule", subj)
 
 
 class TestBudget(unittest.TestCase):

@@ -43,6 +43,10 @@ Mandatory reading before you emit anything:
 Each rule carries its own `**Severity**`; that is the value you put in the finding. Do not infer it
 from the example below.
 
+If the criterion you are firing on begins with a bracketed level — `- [MEDIUM] ...` — that level
+wins over the rule's. `review-conventions.md` has the definitions; rank by what happens if the
+defect is not fixed.
+
 ## How to work
 
 Walk the files **one at a time**. Sweeping the PR in a single pass and reporting what stood out is

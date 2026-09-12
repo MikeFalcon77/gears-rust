@@ -26,6 +26,25 @@ wording of a comment is governed by `docs/toolkit-pr-review/comment-style.md`.
 Every rule carries its own `**Severity**:` line. Use that value; do not infer severity from the
 example in the Output Contract, which is illustrative only.
 
+**A criterion may override its rule.** When a criterion bullet begins with a bracketed level, that
+level is the finding's severity, and the rule's `**Severity**` line does not apply to it:
+
+```markdown
+### 12. RUST-SEC-001 — ...
+**Severity**: CRITICAL
+
+- Secrets, tokens and sensitive identifiers never logged or embedded in URLs
+- [MEDIUM] Dangerous defaults are not silently accepted
+```
+
+Here the first criterion is CRITICAL and the second is MEDIUM. A criterion with no marker inherits
+the rule's level, which is the common case.
+
+The override exists because severity is declared per rule while a rule covers a range: 22 criteria
+inherit CRITICAL from `RUST-SEC-001` alone, and that rule spans both a token written to a log and a
+config field with no length cap. Rank by what the definitions above actually say — what happens if
+this is not fixed — not by which rule the criterion happens to live under.
+
 ## Criterion markers
 
 A criterion may carry an inline marker. Each one changes whether you may post a finding.

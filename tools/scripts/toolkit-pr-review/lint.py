@@ -320,6 +320,16 @@ def check_criteria(rules: dict[str, dict]) -> None:
             trigger = m.group(2) if m else body
             if not trigger.strip(" .-*`"):
                 fail("criteria", f"{who}:{n} criterion has no trigger text after its markers")
+            # A bracketed word where the override goes but not a valid level: the criterion
+            # silently keeps its rule's severity and the marker reads as trigger prose, so the
+            # author's intent is lost without anything failing.
+            # Two letters minimum: `- [ ]` and `- [x]` are markdown checkboxes, not a botched
+            # level, and flagging those would be a false positive in the linter itself.
+            bad = re.match(r"^\[([A-Za-z]{2,})\]\s", body)
+            if bad and not m:
+                fail("criteria",
+                     f"{who}:{n} criterion starts with `[{bad.group(1)}]`, which is not a severity "
+                     f"level. Use one of {'/'.join(SEVERITIES)} or drop the brackets.")
         for i, line in enumerate(text.splitlines(), 1):
             stripped = line.strip()
             if not stripped.startswith("why:"):
@@ -329,6 +339,8 @@ def check_criteria(rules: dict[str, dict]) -> None:
             if re.match(r"^\s*why:\s*-\s", line):
                 fail("criteria", f"{who}:{i} `why:` line starts a bullet; a criterion cannot hide in rationale")
 
+    report_severity_spread()
+
     if total < CRITERIA_FLOOR:
         fail("criteria",
              f"{total} criteria across the rule modules, below the floor of {CRITERIA_FLOOR}. "
@@ -337,6 +349,45 @@ def check_criteria(rules: dict[str, dict]) -> None:
              f"file in the same commit and say why.")
     else:
         note(f"{total} criteria (floor {CRITERIA_FLOOR})")
+
+
+def report_severity_spread() -> None:
+    """How many criteria carry each severity, once inheritance is resolved.
+
+    Severity is declared per rule and every criterion under it inherits, so one rule's label
+    decides how a whole family of findings is ranked: 22 criteria inherit CRITICAL from
+    RUST-SEC-001 alone, which covers both a token written to a log and a config field with no
+    length cap. A criterion-level `[LEVEL]` marker overrides it. Printing the spread every run
+    is what makes a lopsided corpus visible without anyone going looking.
+    """
+    spread: dict[str, int] = dict.fromkeys(SEVERITIES, 0)
+    overrides = 0
+    for path in sorted(RULES_DIR.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if "## Check IDs to Apply" not in text:
+            continue
+        head = text.index("## Check IDs to Apply")
+        current = None
+        for line in text[head:].splitlines():
+            m = re.match(rf"^###\s+(?:\d+\.\s+)?({RULE_ID})", line)
+            if m:
+                current = None
+                continue
+            m = re.match(r"^\*\*Severity\*\*:\s*(\w+)", line)
+            if m:
+                current = m.group(1)
+                continue
+            m = re.match(r"^\s*-\s+(\S.*)$", line)
+            if not m:
+                continue
+            mark = SEVERITY_MARKER.match(m.group(1))
+            if mark:
+                overrides += 1
+                spread[mark.group(1)] = spread.get(mark.group(1), 0) + 1
+            elif current in spread:
+                spread[current] += 1
+    shown = ", ".join(f"{s.lower()}={spread[s]}" for s in SEVERITIES)
+    note(f"criterion severity: {shown} ({overrides} overridden at criterion level)")
 
 
 # Markers of a harness that has gone back to doing prepare's work in prose. Each one names
