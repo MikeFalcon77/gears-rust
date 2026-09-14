@@ -9,6 +9,9 @@ description = "api-contracts example — consumer gear that resolves PaymentApi 
 rust-version.workspace = true
 publish = false
 
+[lib]
+name = "cf_api_contracts_consumer"
+
 [features]
 default = []
 # OpenTelemetry in the resolved REST client: W3C traceparent propagation + RED
