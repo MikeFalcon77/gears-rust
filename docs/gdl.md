@@ -63,7 +63,7 @@ Not refused, but outside the grammar above: arithmetic (`"a" + "b"`, `8000 + 80`
 
 **Booleans / null.** `True`, `False`, `None`.
 
-**The one keyword.** `load`. `from` is reserved, so consume uses `from_`. `crate` is not a legal parameter name, so cargo uses `crate_name`.
+**The one keyword.** `load`. `crate` is not a legal parameter name, so cargo uses `crate_name`.
 
 ---
 
@@ -169,10 +169,10 @@ provide(contract, rust, sdk, local?, rest?, grpc?, policies = [])
 ### `consume(...)` → consume
 
 ```
-consume(contract, rust, sdk, from_, critical = False, resolving_client?)
+consume(contract, rust, sdk, critical = False, resolving_client?)
 ```
 
-`from_` is the providing gear id. `critical` gates readiness. Do not pass `version` or `kind`; that is **GBX0210**.
+`critical` gates readiness. Which gear provides it is **not** written here: `#[toolkit::consumes(from = "...")]` owns that, and the runtime reads the attribute's spelling as a directory key. Do not pass `from_`, `version` or `kind`; that is **GBX0210**.
 
 ### `cluster_plugin(...)` → cluster_plugin
 
@@ -451,7 +451,6 @@ gear(
             contract = "PaymentApi",
             rust = "api_contracts_sdk::PaymentApi",
             sdk = PAYMENT_SDK,
-            from_ = "api-contracts",
             critical = False,
         ),
     ],

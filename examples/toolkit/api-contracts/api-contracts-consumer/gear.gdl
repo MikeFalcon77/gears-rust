@@ -29,13 +29,11 @@ gear(
             contract = "PaymentApi",
             rust = "api_contracts_sdk::PaymentApi",
             sdk = PAYMENT_SDK,
-            from_ = "api-contracts",
         ),
         consume(
             contract = "PaymentApiV2",
             rust = "api_contracts_sdk::PaymentApiV2",
             sdk = PAYMENT_SDK,
-            from_ = "api-contracts",
         ),
     ],
 
