@@ -45,10 +45,17 @@ gear(
     # split's parts. Declaring it would need either the bare name -- and then
     # there are two front doors -- or a directory name the platform's ADR does
     # not define.
+    #
+    # Every `directory_name` is written out, and none is left to the default.
+    # The default is `<gear-id>-<role-name>`, and a role name is a `DeploymentMode`
+    # variant -- so it would splice a kebab id onto a snake_case value and yield
+    # `event-broker-cluster_ingest`. That is neither the name ADR-0009's own table
+    # gives (`event-broker-ingest`) nor a name a Kubernetes Service can carry, and
+    # GBX0118 now refuses it.
     roles = [
         role(name = "cluster_dispatcher", directory_name = "event-broker"),
-        role(name = "cluster_ingest"),
-        role(name = "cluster_delivery"),
+        role(name = "cluster_ingest", directory_name = "event-broker-ingest"),
+        role(name = "cluster_delivery", directory_name = "event-broker-delivery"),
     ],
 
     # No `labels` on the ingest role, and the reason is the gear rather than the
