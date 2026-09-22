@@ -64,6 +64,13 @@ gear(
             ),
             process_local = True,
             needs_credentials = False,
+            # The struct `build_cache` deserializes its options into. A join key
+            # and nothing more: the struct is already the authority on what an
+            # option may be -- `deny_unknown_fields`, as its own comment says --
+            # and what Rust has no way to state is which type the `&Map` handed
+            # to `build_cache` is read as. Declared for the same reason
+            # `process_local` is.
+            cache_options = "StandaloneOptions",
         ),
         cluster_plugin(
             package = cargo(
@@ -73,6 +80,13 @@ gear(
             ),
             process_local = False,
             needs_credentials = True,
+            cache_options = "PostgresClusterConfig",
+            lock_options = "PostgresLockConfig",
+            # Which option is the credential. `connection_string` is a plain
+            # `String`, so nothing in Rust marks it -- the projector reads
+            # `secrecy` wrappers and there is none -- and a form that offered a
+            # plaintext box for it would be offering to commit a password.
+            credential_option = "connection_string",
         ),
         # A network service like postgres, and declared the same way for the
         # same reasons: its state is not in any one process, and it is reached
@@ -86,6 +100,16 @@ gear(
             ),
             process_local = False,
             needs_credentials = True,
+            # Two structs, not one: `build_lock` reads `RedisLockConfig` because
+            # the three cache-only keys have no meaning for a lock, which the
+            # provider's own comment says at the call site.
+            cache_options = "RedisClusterConfig",
+            lock_options = "RedisLockConfig",
+            # `url` embeds the password, which the field's own doc comment says
+            # and its type does not. The name heuristic the Studio uses catches
+            # `connection_string` and misses this one, which is the argument for
+            # declaring it rather than guessing.
+            credential_option = "url",
         ),
     ],
 
