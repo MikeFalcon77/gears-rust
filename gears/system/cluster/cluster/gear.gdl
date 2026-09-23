@@ -47,9 +47,6 @@
 gear(
     name = "Cluster Coordination",
     description = "Cache, leader-election and distributed-lock primitives over pluggable backends.",
-    # "serverless" is the platform's own answer, from gears/system/cluster/gear.toml.
-    # It reads oddly for a coordination gear, but taking the team's taxonomy beats
-    # inventing a better-sounding one.
     category = "serverless",
     visibility = "internal",
 

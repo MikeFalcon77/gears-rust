@@ -3,11 +3,6 @@
 # Fills account-management's identity-provider extension point
 # (`IdpPluginClient`), declared by `fills`. This plugin's vendor and priority
 # are read from source.
-#
-# There is no gear.toml for this plugin, so name and description come from the
-# crate's own Cargo.toml, and the category is the host family's: the platform
-# files account-management under "oss" and has said nothing separate for its
-# plugins.
 
 gear(
     name = "Keycloak IdP Plugin",

@@ -4,8 +4,6 @@
 # static, tenant-scoped policy. The point is declared by `fills`; vendor and
 # priority are read from source.
 #
-# No gear.toml exists for it: name and description are the crate's own, and the
-# category is the host's.
 
 gear(
     name = "Static AuthZ Plugin",

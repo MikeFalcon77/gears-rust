@@ -1,8 +1,7 @@
 # Gearbox product metadata for the Static License Plugin.
 #
 # Fills license-resolver's extension point, declared by `fills`; this plugin's
-# vendor and priority are read from source. There is no gear.toml beside it:
-# the name and description are the crate's own, the category is the host's.
+# vendor and priority are read from source.
 
 gear(
     name = "Static License Plugin",

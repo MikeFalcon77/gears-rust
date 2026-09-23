@@ -5,9 +5,6 @@
 # by `fills`; vendor and priority are read from source, and so is the link to
 # tenant-resolver, which the attribute states as
 # `deps = [types_registry, tenant_resolver]`.
-#
-# No gear.toml exists for it: name and description are the crate's own, and the
-# category is the host's.
 
 gear(
     name = "Tenant-Resolver AuthZ Plugin",

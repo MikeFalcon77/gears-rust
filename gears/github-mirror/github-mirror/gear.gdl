@@ -2,13 +2,6 @@
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (rest, db), colocated_deps
 # (authz-resolver).
-#
-# There is no gear.toml for this gear, so the name is the PRD's title and the
-# description is condensed from the PRD's purpose. **The category is a choice
-# made here, not one the repository records**: nothing else files this gear
-# anywhere, and Studio groups every gear by category, so it needs one. It
-# stands between the platform and an external service, which makes
-# `core-platform-integration` the nearest of the groups in use.
 
 gear(
     name = "GitHub Mirror",
