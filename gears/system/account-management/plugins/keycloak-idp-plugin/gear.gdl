@@ -1,8 +1,8 @@
 # Gearbox product metadata for the Keycloak IdP Plugin.
 #
 # Fills account-management's identity-provider extension point
-# (`IdpPluginClient`), read from source together with this plugin's vendor and
-# priority; only the sdk locator is declared.
+# (`IdpPluginClient`), declared by `fills`. This plugin's vendor and priority
+# are read from source.
 #
 # There is no gear.toml for this plugin, so name and description come from the
 # crate's own Cargo.toml, and the category is the host family's: the platform
@@ -21,11 +21,10 @@ gear(
         path = ".",
     ),
 
-    sdk = cargo(
-        crate_name = "cf-gears-account-management-sdk",
-        lib = "account_management_sdk",
-        path = "../../account-management-sdk",
-    ),
+    # The point this plugin fills, by the GTS spec its host declares. The
+    # declaration is the role; the `impl` in this crate is only checked against
+    # it. No `sdk`: the host's SDK is the host's.
+    fills = "cf.core.idp.plugin.v1~",
 
     # `rust` is named because init reads two structs: first
     # `KeycloakIdpPluginEnabledProbe`, for the `enabled` flag alone, and only

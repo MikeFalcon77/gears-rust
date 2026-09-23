@@ -1,8 +1,8 @@
 # Gearbox product metadata for Single-Tenant Resolver Plugin.
 #
-# One of three alternatives filling tenant-resolver's extension point. Which
-# point that is, and this plugin's vendor and priority, are all read from
-# source; only the sdk locator is declared.
+# One of three alternatives filling tenant-resolver's extension point. The
+# point is declared by `fills`; this plugin's vendor and priority are read
+# from source.
 
 gear(
     name = "Single-Tenant Resolver Plugin",
@@ -16,11 +16,10 @@ gear(
         path = ".",
     ),
 
-    sdk = cargo(
-        crate_name = "cf-gears-tenant-resolver-sdk",
-        lib = "tenant_resolver_sdk",
-        path = "../../tenant-resolver-sdk",
-    ),
+    # The point this plugin fills, by the GTS spec its host declares. The
+    # declaration is the role; the `impl` in this crate is only checked against
+    # it. No `sdk`: the host's SDK is the host's.
+    fills = "cf.core.tenant_resolver.plugin.v1~",
 
     # priority defaults to 1000 so static-tr-plugin wins when both are enabled.
     config_schema = config(exposes = ["vendor", "priority"]),

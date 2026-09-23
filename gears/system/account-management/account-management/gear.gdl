@@ -27,6 +27,23 @@ gear(
         path = "../account-management-sdk",
     ),
 
+    # The point plugins fill, keyed by the GTS spec their instances register
+    # under and this gear selects by. Declared, and checked against the sdk: the
+    # spec must be a `PluginV1` type it declares, the trait a `pub trait` in it.
+    extension_points = [
+        extension_point("cf.core.idp.plugin.v1~", trait = "IdpPluginClient"),
+    ],
+
+    # **Not declared: `fills` for tenant-resolver's point.** This gear can also
+    # register itself as a tenant-resolver plugin, behind `tr_plugin.enabled`,
+    # which defaults to false. Declaring the fill would make every product that
+    # selects this gear without tenant-resolver fail GBX0513, for a role that is
+    # off unless someone turns it on.
+    #
+    # Known gap: the selector reported for the point above is read as
+    # "constructorfabric", which is `tr_plugin.vendor`. The IdP selector is
+    # `idp.vendor`, default "cf". The point cannot yet name its selector field.
+
     # Deliberately empty rather than absent: the crate's only feature is
     # `integration`, which spins up Postgres in Docker per test. "Nothing here
     # for you" is an answer; saying nothing is not.

@@ -16,11 +16,10 @@ gear(
         path = ".",
     ),
 
-    sdk = cargo(
-        crate_name = "cf-gears-usage-collector-sdk",
-        lib = "usage_collector_sdk",
-        path = "../../usage-collector-sdk",
-    ),
+    # The point this plugin fills, by the GTS spec its host declares. The
+    # declaration is the role; the `impl` in this crate is only checked against
+    # it. No `sdk`: the host's SDK is the host's.
+    fills = "cf.core.uc.plugin.v1~",
 
     config_schema = config(exposes = ["vendor", "priority"]),
 )
