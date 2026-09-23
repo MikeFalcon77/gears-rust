@@ -1,0 +1,29 @@
+# Gearbox product metadata for the Static CredStore Plugin.
+#
+# Fills credstore's extension point (`CredStorePluginClientV1`). Which point
+# that is, and this plugin's vendor and priority, are read from source; only the
+# sdk locator is declared.
+
+gear(
+    name = "Static CredStore Plugin",
+    description = "Static credential storage backend plugin for development and single-tenant deployments.",
+    category = "core-platform-integration",
+    visibility = "internal",
+
+    package = cargo(
+        crate_name = "cf-gears-static-credstore-plugin",
+        lib = "static_credstore_plugin",
+        path = ".",
+    ),
+
+    sdk = cargo(
+        crate_name = "cf-gears-credstore-sdk",
+        lib = "credstore_sdk",
+        path = "../../credstore-sdk",
+    ),
+
+    # `secrets` is a list of credential entries. It is not offered as a
+    # control: a form that saved one would be writing a secret into the
+    # description, and no control could render the list anyway.
+    config_schema = config(exposes = ["vendor", "priority"]),
+)

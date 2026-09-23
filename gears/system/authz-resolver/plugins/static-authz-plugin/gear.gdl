@@ -1,0 +1,29 @@
+# Gearbox product metadata for the Static AuthZ Plugin.
+#
+# Fills authz-resolver's extension point (`AuthZResolverPluginClient`) with a
+# static, tenant-scoped policy. The point, vendor and priority are read from
+# source; only the sdk locator is declared.
+#
+# No gear.toml exists for it: name and description are the crate's own, and the
+# category is the host's.
+
+gear(
+    name = "Static AuthZ Plugin",
+    description = "Static tenant-scoped authorization policy for development and testing.",
+    category = "core-platform-integration",
+    visibility = "internal",
+
+    package = cargo(
+        crate_name = "cf-gears-static-authz-plugin",
+        lib = "static_authz_plugin",
+        path = ".",
+    ),
+
+    sdk = cargo(
+        crate_name = "cf-gears-authz-resolver-sdk",
+        lib = "authz_resolver_sdk",
+        path = "../../authz-resolver-sdk",
+    ),
+
+    config_schema = config(exposes = ["vendor", "priority"]),
+)
