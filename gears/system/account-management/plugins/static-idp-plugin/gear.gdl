@@ -2,8 +2,8 @@
 #
 # Fills account-management's identity-provider extension point
 # (`IdpPluginClient`) with a permissive echo, for development and end-to-end
-# stacks. The point, vendor and priority are read from source; only the sdk
-# locator is declared.
+# stacks. The point is declared by `fills`; vendor and priority are read from
+# source.
 #
 # No gear.toml exists for it: name and description are the crate's own, and the
 # category is the host family's.
@@ -20,11 +20,10 @@ gear(
         path = ".",
     ),
 
-    sdk = cargo(
-        crate_name = "cf-gears-account-management-sdk",
-        lib = "account_management_sdk",
-        path = "../../account-management-sdk",
-    ),
+    # The point this plugin fills, by the GTS spec its host declares. The
+    # declaration is the role; the `impl` in this crate is only checked against
+    # it. No `sdk`: the host's SDK is the host's.
+    fills = "cf.core.idp.plugin.v1~",
 
     config_schema = config(exposes = ["vendor", "priority"]),
 )

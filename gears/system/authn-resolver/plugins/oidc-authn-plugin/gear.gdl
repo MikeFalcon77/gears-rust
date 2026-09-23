@@ -21,11 +21,10 @@ gear(
         path = ".",
     ),
 
-    sdk = cargo(
-        crate_name = "cf-gears-authn-resolver-sdk",
-        lib = "authn_resolver_sdk",
-        path = "../../authn-resolver-sdk",
-    ),
+    # The point this plugin fills, by the GTS spec its host declares. The
+    # declaration is the role; the `impl` in this crate is only checked against
+    # it. No `sdk`: the host's SDK is the host's.
+    fills = "cf.core.authn_resolver.plugin.v1~",
 
     # Only the selection keys. This plugin's real surface (jwt, s2s_oauth and six
     # more nested blocks) is the largest in the tree and belongs in YAML; see

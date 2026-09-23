@@ -16,13 +16,20 @@ gear(
         path = ".",
     ),
 
-    # A locator for the backend plugin trait this gear selects an
-    # implementation of; which plugins fill it is read from source.
+    # A locator for the SDK the extension point below is checked against --
+    # the backend plugin spec and trait this gear selects an implementation of.
     sdk = cargo(
         crate_name = "cf-gears-credstore-sdk",
         lib = "credstore_sdk",
         path = "../credstore-sdk",
     ),
+
+    # The point plugins fill, keyed by the GTS spec their instances register
+    # under and this gear selects by. Declared, and checked against the sdk: the
+    # spec must be a `PluginV1` type it declares, the trait a `pub trait` in it.
+    extension_points = [
+        extension_point("cf.core.credstore.plugin.v1~", trait = "CredStorePluginClientV1"),
+    ],
 
     # Deliberately empty rather than absent: `test-support` pulls an
     # OpenTelemetry SDK for the crate's own tests and is not a product choice.

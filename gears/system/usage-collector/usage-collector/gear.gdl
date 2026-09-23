@@ -22,6 +22,13 @@ gear(
         path = "../usage-collector-sdk",
     ),
 
+    # The point plugins fill, keyed by the GTS spec their instances register
+    # under and this gear selects by. Declared, and checked against the sdk: the
+    # spec must be a `PluginV1` type it declares, the trait a `pub trait` in it.
+    extension_points = [
+        extension_point("cf.core.uc.plugin.v1~", trait = "UsageCollectorPluginV1"),
+    ],
+
     # `vendor` selects the storage plugin. `metrics` is a nested struct and
     # stays in the configuration file.
     config_schema = config(exposes = ["vendor"]),
