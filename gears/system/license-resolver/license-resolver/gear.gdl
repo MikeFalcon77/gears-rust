@@ -1,0 +1,27 @@
+# Gearbox product metadata for the License Resolver.
+#
+# Projected from #[toolkit::gear]: id, runtime_caps (system), colocated_deps
+# (types-registry). The same host shape as tenant-resolver: one `vendor`
+# selector choosing which registered plugin answers.
+
+gear(
+    name = "License Resolver",
+    description = "Abstraction layer for license feature checks with caching and metrics collection.",
+    category = "core-platform-integration",
+    visibility = "internal",
+
+    package = cargo(
+        crate_name = "cf-gears-license-resolver",
+        lib = "license_resolver",
+        path = ".",
+    ),
+
+    sdk = cargo(
+        crate_name = "cf-gears-license-resolver-sdk",
+        lib = "license_resolver_sdk",
+        path = "../license-resolver-sdk",
+    ),
+
+    # The selector: which registered plugin instance this host answers with.
+    config_schema = config(exposes = ["vendor"]),
+)

@@ -1,6 +1,8 @@
 # Gearbox product metadata for the types-registry gear.
 #
-# Projected from #[toolkit::gear]: id, runtime_caps (system, rest).
+# Projected from #[toolkit::gear]: id, runtime_caps (system, db, rest,
+# stateful), and the lifecycle (entry `serve`, stop timeout 30s, awaits
+# readiness).
 
 gear(
     name = "Types Registry",
