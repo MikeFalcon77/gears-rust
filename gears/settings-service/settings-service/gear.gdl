@@ -11,8 +11,8 @@ gear(
     category = "serverless",
     visibility = "internal",
 
-    # Neither crate has a [lib] section, so each links as its package name
-    # with underscores.
+    # Both crates name their library target explicitly, after the package
+    # name with underscores -- not `settings_service`.
     package = cargo(
         crate_name = "cf-gears-settings-service",
         lib = "cf_gears_settings_service",

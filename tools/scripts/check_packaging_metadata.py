@@ -223,12 +223,14 @@ def check_declared_targets(
     if not isinstance(package_name, str):
         return violations  # nothing to derive a name from; cargo will complain first
 
-    if (crate_dir / "src" / "lib.rs").is_file():
+    # `autolib = false` / `autobins = false` turn auto-discovery off, so the
+    # source file no longer implies a target and there is nothing to name.
+    if (crate_dir / "src" / "lib.rs").is_file() and package.get("autolib") is not False:
         lib = data.get("lib")
         if not (isinstance(lib, dict) and isinstance(lib.get("name"), str)):
             violations.append(("[lib]", package_name.replace("-", "_")))
 
-    if (crate_dir / "src" / "main.rs").is_file():
+    if (crate_dir / "src" / "main.rs").is_file() and package.get("autobins") is not False:
         declared = data.get("bin")
         declared = declared if isinstance(declared, list) else []
         # A `[[bin]]` for some `src/bin/*.rs` does not cover `src/main.rs`:

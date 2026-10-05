@@ -18,8 +18,8 @@ gear(
         path = ".",
     ),
 
-    # `cf-gears-resource-group-sdk` has no [lib] section, so its library
-    # identifier is `cf_gears_resource_group_sdk`, NOT `resource_group_sdk`.
+    # `cf-gears-resource-group-sdk` names its library target
+    # `cf_gears_resource_group_sdk` in `[lib]`, NOT `resource_group_sdk`.
     # Declared rather than derived for exactly this reason: deriving it would
     # emit a link line that does not compile.
     sdk = cargo(
