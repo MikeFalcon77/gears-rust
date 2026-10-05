@@ -98,7 +98,7 @@ This decision directly addresses the following requirements or design elements:
 
 ## Amendment 2026-09-09: Profile 2 is named Self-Hosted
 
-**The name changes; the topology does not.** Profile 2 is still one Platform Host
+**The name changes; the topology does not.** Profile 2 is still Flight Control
 spawning OoP Workers, still the on-premise answer for operators who cannot run
 Kubernetes, and still the same test matrix entry. Nothing in the decision above
 is withdrawn.
@@ -112,12 +112,14 @@ inside that choice relate to each other. That is a real fact, and it belongs in
 the body of this ADR, but it is not the name of the option on the menu that
 Decision Drivers calls "a clear menu, not an unbounded configuration space".
 
-**It also reads as a shape the profile does not have.** The phrase suggests a
+**It also reads as a shape a deployment need not have.** The phrase suggests a
 host beside a fleet of workers. Measured on Gearbox's demo product in this
-profile: one host process holds nine gears and spawns exactly one worker. The
-honest picture is "the product in one process, with some gears pushed out of it"
-— the ratio is the opposite of what the name implies, and a reader planning a
-deployment starts from the wrong mental model.
+profile: the host process holds nine gears and spawns exactly one worker. That
+host is not the platform's Flight Control image -- Gearbox generates the host
+application, linking Flight Control's control-plane gears and, beside them,
+whichever product gears the product keeps in-process. So the ratio depends on the
+product, and a name that promises a fleet starts a reader from the wrong mental
+model.
 
 The documents here had already noticed, and were compensating in prose. Before
 this amendment `DESIGN.md` headed the section "Profile 2: Host + Workers
@@ -126,9 +128,11 @@ parenthesis was doing the work the name should do. `Self-Hosted` promotes that
 gloss to the name, and those two places now carry the name alone.
 
 **What is unchanged and must stay unchanged.** The `host` and `worker` roles are
-load-bearing and keep their names: the Platform Host runs Flight Control
-(DirectoryService) and system gears and spawns the workers; workers run
-application gears. This amendment renames the *profile*, not the roles inside it.
+load-bearing and keep their names. The host is Flight Control
+(`apps/cf-gears-flight-control`): the control plane -- service-discovery
+(DirectoryService), grpc-hub, api-gateway, types-registry and authn-resolver --
+and it spawns the workers; workers run the AuthZ plane and application gears.
+This amendment renames the *profile*, not the roles inside it.
 
 **Downstream.** Gearbox implements only the single-node half of this profile —
 its resolver reports `GBX0604` to say the one spawn backend is local, and directs
