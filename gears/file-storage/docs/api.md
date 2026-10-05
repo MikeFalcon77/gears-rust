@@ -61,7 +61,7 @@ Encoding conventions:
 ```text
 1.  POST   /files                          create file + return a signed upload URL (JSON body — see below; gts_file_type required)
 2.  POST   /files/{id}/versions            presign a new-version upload (no request body, no If-Match) → signed upload URL
-3.  POST   /files/{id}/bind                bind/rebind content_id := version_id                          — If-Match
+3.  POST   /files/{id}/bind                bind/rebind content_id := version_id                          — If-Match (omittable only on a file's first bind; required to rebind)
 4.  GET    /files/{id}/download-url         issue a signed download URL (pins current content_id, or ?version_id=)
 5.  PATCH  /files/{id}                      update custom metadata (JSON Merge Patch)        — If-Match-Metadata?
 6.  GET    /files/{id}                      file metadata (JSON)                                          — If-None-Match
@@ -141,7 +141,10 @@ Notes:
   shares with `complete`'s `bind_state`: `X-FS-Bound: true` + `ETag: <new content etag>` (bound), or
   `X-FS-Bound: conflict` + `X-FS-Current-ETag: <current etag>` (CAS lost — e.g. two create-tokens on one new file;
   the version is `available`, resolve with a manual `bind` using that ETag as `If-Match`, no re-upload). No headers
-  for `bind: "manual"` uploads. An honest `PUT` retry (lost response) is idempotent: `publish_exclusive` is
+  for `bind: "manual"` uploads. **Client rule:** the *absence* of `X-FS-Bound` on the `PUT` response means "not
+  bound" — a `bind: "manual"` upload, or an instance that does not auto-bind (e.g. an older instance during a
+  rolling update) — and the client must then call `POST /files/{id}/bind` itself; a `200` alone never implies the
+  version was bound. An honest `PUT` retry (lost response) is idempotent: `publish_exclusive` is
   replay-safe and finalize converges an already-`available` version with matching size/hash to the same headers —
   never a 409 — **regardless of the upload's bind mode**: the sidecar publishes every single-part upload through the
   same replay-safe path whether or not the token carries the auto-bind claim, so a `bind: "manual"` retry converges
@@ -638,8 +641,10 @@ identically to a manual bind and to an auto-bind whose CAS lost and reported `bi
    same transaction, under CAS (see above) — there is no separate step 4 in that case.
 4. **Bind** (`bind: "manual"` only, or a rebind after an auto-bind's CAS lost): the client calls
    `POST /files/{id}/bind { version_id }` with `If-Match: "<current content
-   ETag>"` to swap `content_id := version_id` under optimistic CAS. Binding a version whose upload has not yet been
-   finalized (still `pending`) fails with `409`.
+   ETag>"` to swap `content_id := version_id` under optimistic CAS. `If-Match` may be omitted only on the first bind
+   of a file that has no content yet; to rebind already-bound content it is required (`400`, "If-Match is required
+   to rebind already-bound content"). Binding a version whose upload has not yet been finalized (still `pending`)
+   fails with `409`.
 
 Backend content is never mutated in place; a replacement is always a new version + a pointer swap.
 
@@ -693,6 +698,14 @@ avoid leaving this unswept sibling behind.
   `infra/signed_url/mod.rs`) — this is deliberate, not an oversight: the sidecar has **no DB connection at all** (see
   "Response headers" below and ADR-0003), so it cannot resolve them any other way. The sidecar resolves the object
   purely from the verified claims, never from a "version row" lookup.
+- **Scheme and host are not signed.** The signature covers the token's claims (`op`, `file_id`, `version_id`,
+  `backend_id`, `backend_path`, `exp`, …), not the URL's scheme or host: `sidecar_base_url` only sets what the
+  control plane puts in front of the path when it builds the URL, and the sidecar checks neither the request's
+  scheme nor its `Host`/authority against anything. A caller may therefore replace the scheme and host of a signed
+  URL — e.g. to reach the sidecar through an internal address from a server-side caller — as long as the path and
+  the token (the `fs-token` query parameter, or the `X-FS-Token` header) are kept verbatim. The path that must be
+  kept is the sidecar's own `/api/file-storage-data/v1/…` route; a sub-path prefix that only a fronting reverse
+  proxy strips is not part of it.
 - **Claims (inside the token; AND-combined; all optional except `exp` and `op`):**
   | Claim | Req. | Enforced? | Applies | Violation |
   |---|---|---|---|---|
@@ -740,8 +753,12 @@ avoid leaving this unswept sibling behind.
 - **`max_size` and `exact_size` are mutually exclusive by construction** — no code path mints a token with both set —
   but this is **not independently validated** as a "both present" error at presign or verify time; there is no
   dedicated rejection path for that combination.
-- **`expected_hash`** `<alg>` must be in the backend allow-list (currently `SHA-256` only); lowercase hex; baked by
-  the control plane (may carry a client-supplied value from the presign request).
+- **`expected_hash`** (`<alg>:<hex>`) is a **reserved** claim: `UploadConstraints` has the field and the sidecar
+  enforces it (`<alg>` is `SHA-256`, the only algorithm its comparison matches; the hex digest is compared
+  case-insensitively with the streamed SHA-256, `400` on mismatch), but no control-plane path sets it today —
+  `create_file`, its idempotent replay and `presign_version` bake only `max_size`, and no REST request field can
+  supply a hash (`CreateFileReq` has none). Upload integrity therefore rests on the control plane's
+  re-verification at `finalize`.
 - **`max_rate` / `max_conns` are not implemented.** No such claims exist on `Claims` and the sidecar enforces no
   per-URL rate/connection cap; this remains an open design point (scoping to one `(file_id, op)` and cross-instance
   coordination across the sidecar fleet).
@@ -759,7 +776,9 @@ avoid leaving this unswept sibling behind.
 
 ## Conditional headers
 
-- `If-Match`: required on **bind** (`POST /files/{id}/bind`) and on `DELETE`. Mismatch → `400 Bad Request` on the
+- `If-Match`: required on `DELETE`, and on **bind** (`POST /files/{id}/bind`) whenever it rebinds already-bound
+  content — it may be omitted only on the first bind of a file that has no content yet (omitting it on a rebind is
+  a `400`, "If-Match is required to rebind already-bound content"). Mismatch → `400 Bad Request` on the
   control plane (`FailedPrecondition` collapses to `400` on this platform — see "Status code summary" below). The
   sidecar's data-plane `PUT` does not check `If-Match` at all — it only streams bytes and calls finalize; conditional
   concurrency on content is enforced solely by the control-plane `bind` handler.
@@ -861,8 +880,10 @@ access or carry substantially more per-request state in the token than it does t
   semantic validation (all three predicates absent, a zero-day age/inactivity field, or a missing
   `scope_target_id` for `user`/`file` scope); the declared file size exceeds
   the effective policy size limit (control plane, `create_file`/`presign_version`/multipart `initiate`); an
-  `If-Match`/`If-Match-Metadata` precondition mismatch on control-plane `bind`/`DELETE`/`PATCH`/multipart `complete`
-  (`FailedPrecondition` collapses to `400` on this platform — there is no `412`-mapped canonical-error variant); a
+  `If-Match`/`If-Match-Metadata` precondition mismatch on control-plane `bind`/`DELETE`/`PATCH`/multipart `complete`,
+  or a `bind` that rebinds already-bound content without `If-Match` (`FailedPrecondition` collapses to `400` on this
+  platform — there is no `412`-mapped canonical-error variant; the rebind case reads "If-Match is required to rebind
+  already-bound content"); a
   multipart initiate whose target backend does not support native multipart (`MULTIPART_NOT_SUPPORTED`); the
   finalize callback's read-back size/hash/mime not matching the sidecar's claim, or no blob present at the
   version's backend path at all (control plane, `POST .../finalize` — see

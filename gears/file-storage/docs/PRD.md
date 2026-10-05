@@ -1085,8 +1085,10 @@ system **MUST**:
   is the current version pointer, the ETag changes exactly when content is (re)bound
 - Support `If-None-Match` on download/metadata reads — return `304 Not Modified` when the ETag matches
 - Support `If-Match` on reads — return `400 failed_precondition` when the ETag does not match
-- Require `If-Match` on every content **bind** (the optimistic CAS that swaps `content_id`) and on `DELETE` —
-  `400 failed_precondition` on mismatch. The retry re-binds the already-uploaded `version_id` without re-upload.
+- Require `If-Match` on `DELETE` and on every content **bind** that rebinds already-bound content (the optimistic CAS
+  that swaps `content_id`; it may be omitted only on the first bind of a file that has no content yet) —
+  `400 failed_precondition` on mismatch, or when a required `If-Match` is missing. The retry re-binds the
+  already-uploaded `version_id` without re-upload.
   The bind may also execute **inside** the upload itself (`bind: "auto"`, the
   default on `POST /files`) — the CAS requirement is unchanged, only the transport differs: multipart `complete`
   reuses its own `If-Match` (absent → the first-content `content_id IS NULL` case) as the embedded bind's
@@ -1109,8 +1111,9 @@ concurrently. Both follow standard HTTP semantics (RFC 7232) understood by all H
 file metadata for all backends, ETags are a FileStorage-level feature independent of backend capabilities.
 **Actors**: `cpt-cf-file-storage-actor-platform-user`, `cpt-cf-file-storage-actor-cf-gears`
 
-**Partial:** the control plane implements `If-None-Match`/`If-Match` on metadata reads, requires `If-Match` on bind
-and `DELETE`, and supports the `If-Match-Metadata` revision precondition. The **sidecar** implements `Range`
+**Partial:** the control plane implements `If-None-Match`/`If-Match` on metadata reads, requires `If-Match` on `DELETE`
+and on a bind that rebinds already-bound content (optional on a file's first bind), and supports the
+`If-Match-Metadata` revision precondition. The **sidecar** implements `Range`
 (`cpt-cf-file-storage-fr-range-requests`) but not `If-None-Match` → `304` on content download — a deliberate,
 documented-but-not-yet-implemented gap, since every download token is already scoped to one
 `(file_id, version_id)` and a short expiry, making the bandwidth win of a conditional download small.
@@ -1760,7 +1763,7 @@ code; see `cpt-cf-file-storage-fr-owner-deletion`.
   to the content hash
 - [ ] Conditional download with `If-None-Match` returns `304 Not Modified` when file is unchanged
   (**Partial:** implemented on the control-plane metadata `GET`; not implemented on the sidecar's content download)
-- [x] `If-Match` is required on content **bind** and on `DELETE`; missing or mismatching `If-Match` returns `400 failed_precondition`
+- [x] `If-Match` is required on `DELETE` and on content **bind** whenever it rebinds already-bound content (it may be omitted only on the first bind of a file that has no content yet); a missing or mismatching `If-Match` returns `400 failed_precondition`
 - [x] An optional metadata-revision precondition on metadata-only updates returns `400 failed_precondition` on mismatch, giving
   lost-update protection for concurrent metadata writers; when omitted, metadata updates remain last-write-wins
 - [x] An upload whose bind never completes leaves no current pointer to it; the orphan `pending` version and its blob

@@ -1,5 +1,5 @@
 Created:  2026-07-02 by Constructor Tech
-Updated:  2026-07-02 by Constructor Tech
+Updated:  2026-10-05 by Constructor Tech
 
 # Decomposition: File Storage
 
@@ -270,8 +270,10 @@ gear's code. It remains a planned P2 requirement (see PRD.md/DESIGN.md).
   - `GET`/`PUT /policy` (tenant or user scope) and `GET /policy/effective` (the resolved effective policy for the
     caller's context)
   - Enforcement call sites: allowed-MIME, effective size-limit and metadata-limit checks on `create_file`
-    (including idempotent replay) and `presign_version`; size re-check at single-shot finalization; MIME and
-    size checks at multipart initiate and size re-check at multipart completion; metadata-limit check on the
+    (fresh create, and idempotent replay -- a replay re-checks MIME and metadata against the CURRENT policy and
+    re-mints the upload URL under the current effective `max_size`); allowed-MIME and effective size-limit
+    checks only (no metadata-limit check) on `presign_version`; size re-check at single-shot finalization; MIME
+    and size checks at multipart initiate and size re-check at multipart completion; metadata-limit check on the
     merged metadata in `update_metadata`
 
 - **Out of scope**:

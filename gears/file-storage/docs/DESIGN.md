@@ -50,14 +50,17 @@ FileStorage is a tenant-aware, owner-aware file storage service for Gears, split
 Consumers never address backends directly — the signed URL always points at the sidecar — so backend opacity,
 centralized per-byte metering, and uniform audit/policy coverage are preserved while the byte-moving data plane scales
 independently of the control plane. A **read** is two requests: a control request to mint a signed GET URL, then a
-data request against the sidecar. A **write** touches the control plane three times and the data plane once: presign
-(control — pre-registers a `pending` version and mints a signed PUT URL) → `PUT` (data — the sidecar streams bytes to
-the backend) → finalize (data→control, a token-authenticated HTTP callback — within a trusted network boundary, or
-over TLS/equivalent authenticated encryption when it crosses an untrusted network — the sidecar makes after a
-successful `PUT` — the same signed `fs-token` is its sole authorization, with no separate app-token or on-behalf-of
-delegation — flipping the version `pending → available`) → `bind` (control — a separate, later request the client
-issues to swap the file's `content_id` pointer under `If-Match`). See §3.2 (`bind-service`, `sidecar-gateway`) for the
-finalize contract and §3.6 for the sequence diagram.
+data request against the sidecar. A **write** is presign (control — pre-registers a `pending` version and mints a
+signed PUT URL) → `PUT` (data — the sidecar streams bytes to the backend) → finalize (data→control, a
+token-authenticated HTTP callback — within a trusted network boundary, or over TLS/equivalent authenticated
+encryption when it crosses an untrusted network — the sidecar makes after a successful `PUT` — the same signed
+`fs-token` is its sole authorization, with no separate app-token or on-behalf-of delegation — flipping the version
+`pending → available`). In the default `bind: "auto"` flow of `POST /files` that same finalize also binds the new
+file's first content inline, so the write is two client requests (`POST /files` + `PUT`). With `bind: "manual"` —
+and for `POST /files/{id}/versions` uploads, which never auto-bind — a `bind` (control — a separate, later request
+the client issues to swap the file's `content_id` pointer under `If-Match`) follows, for three control-plane touches
+and one data-plane touch. See §3.2 (`bind-service`, `sidecar-gateway`) for the finalize contract and §3.6 for the
+sequence diagram.
 
 The P1 architecture is deliberately narrow:
 
@@ -132,11 +135,11 @@ See [PRD.md](./PRD.md) §1 "Overview" and §1.3 "Goals":
 | `cpt-cf-file-storage-fr-backend-config-source`         | Platform gear YAML config (`gear_config`) loaded at gear startup → in-memory `BackendRegistry`; sidecar loads its own equivalent set from `FS_SIDECAR_*` env vars; surfaced read-only via `/storages`                                                                     |
 | `cpt-cf-file-storage-fr-rest-api`                      | Control-plane Axum router under `/api/file-storage/v1`: metadata, listing, version bind, and signed-URL issuance via OperationBuilder — **no content endpoints** (content lives on the sidecar)                                                   |
 | `cpt-cf-file-storage-fr-range-requests`                | See §4.1 Random Read Access for the full mechanics                                                                                                                       |
-| `cpt-cf-file-storage-fr-conditional-requests`          | Content-only `ETag` derived from `(file_id, content_id)`; `If-None-Match` enforced on the control plane's metadata `GET` (→ `304`), `If-Match` on bind/delete; neither is processed on the sidecar's content `GET` |
+| `cpt-cf-file-storage-fr-conditional-requests`          | Content-only `ETag` derived from `(file_id, content_id)`; `If-None-Match` enforced on the control plane's metadata `GET` (→ `304`), `If-Match` on delete and on bind (required to rebind already-bound content, omittable only on a file's first bind); neither is processed on the sidecar's content `GET` |
 | `cpt-cf-file-storage-fr-signed-urls`                   | Control plane mints an Ed25519-signed compact token (PASETO `v4.public`-equivalent codec, sole issuer); sidecar verifies with the public key; AND-combined claims (`op`, `file_id`, `version_id`, `backend_id`, `backend_path`, `exp`, upload size/hash) carried in the query (`?fs-token=`) or a header — `ip`/token-claim predicates are a documented, not-yet-implemented extension point — see §4.5 |
 | `cpt-cf-file-storage-fr-file-versioning`               | `file_versions` table (P1); each version a distinct immutable object `/{file_id}/{version_id}`; current = `content_id` pointer; restore = re-bind a prior `version_id`; backend-agnostic |
 | `cpt-cf-file-storage-fr-multipart-upload`              | P2 resumable multipart upload, owned by the `multipart-coordinator` component: `POST .../multipart` computes a server-authoritative parts plan (one signed sidecar URL per part); the sidecar streams each part without buffering; `complete` assembles and hashes the parts (offset-manifest composite, ADR-0006) and finalizes the version; `abort`/`introspect` round out the session lifecycle |
-| `cpt-cf-file-storage-fr-auto-bind`                     | `bind: "auto"` (default) has the sidecar's finalize callback bind the first content itself under a `content_id IS NULL` CAS, in the same transaction as the `pending → available` flip — the dominant single-file upload is 2 requests (`POST /files` + `PUT`); `bind: "manual"` keeps the separate, client-issued `bind` request |
+| `cpt-cf-file-storage-fr-auto-bind`                     | `bind: "auto"` (default) has the control plane's finalize handler (the sidecar's callback) bind the first content itself under a `content_id IS NULL` CAS, in the same transaction as the `pending → available` flip — the dominant single-file upload is 2 requests (`POST /files` + `PUT`); `bind: "manual"` keeps the separate, client-issued `bind` request |
 | `cpt-cf-file-storage-fr-multipart-complete-lease`      | `complete_multipart_upload` is idempotent and returns `202 {state: "completing", retry_after_secs}` while another caller holds the completion lease, instead of a second concurrent assembly running; a retry (including after a page reload) replays the persisted result |
 | `cpt-cf-file-storage-fr-sidecar-callbacks`             | The sidecar's `finalize`/`report-part` callbacks are token-authenticated HTTP `POST`s back to the control plane's `bind-service`, within a trusted network boundary or over TLS/equivalent authenticated encryption when crossing an untrusted network — no FS SDK call, no app-token, no on-behalf-of delegation; the previously-verified signed token is the callback's sole authorization |
 | `cpt-cf-file-storage-fr-callback-internal-token`       | An optional interim gear-local shared-secret second factor (`x-fs-internal-token`, `FinalizeAuth`) layered on top of the signed upload token for the finalize/report-part callbacks; a stop-gap until the platform's `internal_auth` profiles are deployable in this gear |
@@ -373,7 +376,7 @@ infrastructure layer.
 | `Version`             | An immutable content blob of a file: `(file_id, version_id, size, hash_algorithm, hash_value, hash_mode, part_count, status, is_current, created_at)`; backend object at `/{file_id}/{version_id}`. `hash_mode` (ADR-0006) is `whole-sha256` or `multipart-composite-sha256`; `part_count` is set only for the latter, whose manifest lives in `version_hash_manifest` |
 | `CustomMetadata`      | User-defined key-value pairs attached to a `File`; one row per `(file_id, key)`                                                            |
 | `OwnerPrincipal`      | Tagged union `{User(UserId), App(GearId)}`; carried as `(owner_kind, owner_id)` on `File`                                                |
-| `VersionState`        | Enum `{Pending, Available}`; a version is `Pending` from pre-register until **finalize** (the sidecar's post-`PUT` callback), then `Available`. Binding — swapping which version is the file's current `content_id` — is a separate, later step and does not itself change a version's status |
+| `VersionState`        | Enum `{Pending, Available}`; a version is `Pending` from pre-register until **finalize** (the sidecar's post-`PUT` callback), then `Available`. Binding — swapping which version is the file's current `content_id` — does not itself change a version's status (it follows finalize: inline in the same transaction for `bind: "auto"`, otherwise a separate, later client request) |
 | `ContentId`           | The `version_id` currently bound as the file's live content (`File.content_id`); changing it is a pointer swap                              |
 | `ETag`                | Opaque `String` (HTTP-quoted lowercase hex of a truncated SHA-256 digest — `domain::etag::content_etag`); derived from `(file_id, content_id)`; **MUST NOT** equal `hash_value`                     |
 | `SignedUrl`           | A control-minted **Ed25519-signed compact token** (`base64url(payload).base64url(signature)`), codec-equivalent to PASETO `v4.public` but not literally PASETO (no footer, no `kid`) — carrying claims `(op, file_id, backend_id, backend_path, version_id, exp, constraints)`; **opaque** to all but control+sidecar; carried as `?fs-token=` query or `X-FS-Token` header (§4.5) |
@@ -532,10 +535,18 @@ callback), and **bind** a finalized version as the file's current `content_id` u
   within a trusted network boundary, or over TLS/equivalent authenticated encryption when it crosses an untrusted
   network — authorized solely by the same signed upload token (`fs-token`) that authorized the `PUT` — no FS SDK call, no
   on-behalf-of delegation. Re-reads the blob from the backend and recomputes size/hash/MIME from the actual bytes
-  rather than trusting the sidecar's claim (defense-in-depth); does **not** touch `content_id`
+  rather than trusting the sidecar's claim (defense-in-depth). With a `bind: "manual"` token (and for
+  `POST /files/{id}/versions` uploads) it does **not** touch `content_id`; a `bind: "auto"` token (a new file's first
+  content) makes it also bind the version in the same transaction, under a strict `content_id IS NULL`
+  compare-and-set that can never replace existing content, and return the outcome to the sidecar for transparent
+  forwarding (`X-FS-Bound`/`ETag`/`X-FS-Current-ETag`)
 - **Bind** (`content_id := version_id`): optimistic CAS on the current `content_id`/ETag via `If-Match`; on mismatch
-  return a precondition-failed error (client re-reads the ETag and retries). Invoked **only** by the client as a
-  separate, later control-plane request — the sidecar never binds and never calls this on the client's behalf
+  return a precondition-failed error (client re-reads the ETag and retries). `If-Match` may be omitted only on the
+  first bind of a file that has no content yet; rebinding already-bound content requires it (precondition-failed
+  otherwise). Invoked by the client as a separate, later control-plane request — for `bind: "manual"` uploads,
+  `POST /files/{id}/versions` uploads, and a rebind after a lost auto-bind compare-and-set. The sidecar itself never
+  binds and never calls this on the client's behalf (in the default `bind: "auto"` flow the control plane's finalize
+  handler performs the first-content swap inline)
 - Validate a client bind against the DB: the target `version_id` must exist with status `available` (i.e. already
   finalized)
 - Bump nothing else — content writes do not bump `meta_version`
@@ -574,8 +585,11 @@ component clients hit for content.
 - On upload: stream the body through `stream-proxy` to the backend first (the version was already pre-registered by
   the control plane at presign time — the sidecar does **not** pre-register); once bytes have landed, call the
   control plane's token-authenticated **finalize** callback (same `fs-token`, no app-token, no on-behalf-of
-  delegation, no FS SDK call) to flip the version `pending → available`. The sidecar does **not** bind — binding
-  (the CAS swap of `content_id`) is a separate request the client issues to the control plane afterwards
+  delegation, no FS SDK call) to flip the version `pending → available`. The sidecar does **not** bind (it never
+  reads the bind claim and never calls the bind endpoint) — for a `bind: "manual"` upload, binding (the CAS swap of
+  `content_id`) is a separate request the client issues to the control plane afterwards; for the default
+  `bind: "auto"`, the control plane's finalize handler performs the first-content swap inline and the sidecar only
+  forwards the outcome on its `PUT` response (`X-FS-Bound`/`ETag`/`X-FS-Current-ETag`)
 - Echo the token's `content_type`/`etag` claims as `Content-Type`/`ETag` — the only response-header values the
   token carries; advertise `Accept-Ranges: bytes`
 - Own the **best-effort cleanup**: on any error after the streaming write started (the sidecar itself aborts only on stream
@@ -985,7 +999,9 @@ schema, status codes — is documented in **[api.md](./api.md)**. The summary:
   separate OpenAPI document is deferred to P2
 - **No `?replace_content` flag**: content replacement is structural — a new version is uploaded and **bound** under
   CAS, never an in-place mutation of an existing object — so the old "explicit replace intent" flag is gone
-- **Conditional headers**: `If-Match` required on **bind** and `DELETE`; `If-None-Match` is supported on the control
+- **Conditional headers**: `If-Match` required on `DELETE`, and on **bind** whenever it rebinds already-bound content
+  (it may be omitted only on the first bind of a file that has no content yet — omitting it on a rebind is a
+  `400 failed_precondition`); `If-None-Match` is supported on the control
   plane's metadata `GET` (→ `304`), but neither `If-Match` nor `If-None-Match` is processed on the sidecar's content
   `GET` (§4.1). ETag is `(file_id, content_id)`-derived and content-only.
   `If-Match-Metadata: <u64>` is an optional metadata-concurrency validator on metadata-only updates, matched against
@@ -1121,7 +1137,7 @@ sequenceDiagram
         CTL-->>C: precondition-failed (re-read the ETag and retry bind — NO re-upload)
     end
     Note over SC,BA: Backend object /file_id/version_id is immutable — a new content write is a NEW version + pointer swap.<br/>An upload whose bind never happens leaves a pending or available-but-unbound version + blob → swept by the P2 cleanup engine.
-    Note over C,CTL: finalize (sidecar→control, token-authenticated) only flips pending→available; it never touches content_id.<br/>bind (client→control, If-Match) is the only step that swaps content_id, and can be retried without re-uploading bytes.
+    Note over C,CTL: This diagram shows the staged flow (bind manual). There finalize (sidecar→control, token-authenticated) only flips pending→available and never touches content_id, so bind (client→control) is the step that swaps content_id. If-Match is optional on a file's first bind and required to rebind.<br/>In the default flow (bind auto) the finalize callback itself also performs the first-content CAS (content_id IS NULL) and reports it on the PUT response via the X-FS-Bound header (with ETag). The separate bind is then needed only after a lost CAS or to rebind. Any bind can be retried without re-uploading bytes.
 ```
 
 #### Download — full file (P1)
@@ -1593,7 +1609,8 @@ caller that needs the size ahead of time can issue `HEAD` instead, or read it fr
 **No conditional headers on the sidecar's content path.** The sidecar's `GET`/`PUT` process only `Range` (this
 section) and the token's own `exp` — neither `If-Match` nor `If-None-Match` is read or enforced there. Conditional
 semantics live entirely on the **control plane**: `If-None-Match` on `GET /files/{id}` (metadata, → `304`) and
-`If-Match` on `bind`/`DELETE` (content-pointer CAS, §3.6). A client that wants to avoid a stale re-download re-checks
+`If-Match` on `DELETE` and on `bind` (content-pointer CAS, §3.6 — required to rebind already-bound content, omittable
+only on a file's first bind). A client that wants to avoid a stale re-download re-checks
 the control-plane metadata endpoint (or simply re-presigns, since a token already pins one `(file_id, version_id)`)
 rather than relying on a sidecar-side conditional check.
 
@@ -1704,7 +1721,7 @@ Concurrency caps:
 | `cpt-cf-file-storage-nfr-metadata-latency`      | Designed              | Single-row Postgres lookup; expected p95 well within budget under target load                                                                        |
 | `cpt-cf-file-storage-nfr-transfer-latency`      | Designed              | Sidecar streams end-to-end; no full-file buffering; range translated to backend-native where supported. The extra control round-trip (presign) is a small metadata call, off the byte path |
 | `cpt-cf-file-storage-nfr-url-availability`      | Designed              | File identity (`file_id`) is stable for the file's lifetime; access is via re-presignable signed URLs; deleted files return `404`                    |
-| `cpt-cf-file-storage-nfr-durability`            | Designed              | Finalize-then-bind model: the version is `pending` at pre-register and flips to `available` only after a successful sidecar streaming write (`publish_exclusive`) + **finalize** (the sidecar's token-authenticated callback, which re-reads the blob from the backend and independently verifies size/hash before persisting) — so `content_id` never points at missing or unverified bytes once a later client `bind` swaps the pointer. A `pending` version whose finalize never completes, plus its blob, is an orphan: the sidecar best-effort deletes the partial object on a stream/size-constraint error path, and the P2 cleanup engine sweeps the residue (hard sidecar crash between the streamed write and finalize). The `files` row never points at a non-`available` version |
+| `cpt-cf-file-storage-nfr-durability`            | Designed              | Finalize-then-bind model: the version is `pending` at pre-register and flips to `available` only after a successful sidecar streaming write (`publish_exclusive`) + **finalize** (the sidecar's token-authenticated callback, which re-reads the blob from the backend and independently verifies size/hash before persisting) — so `content_id` never points at missing or unverified bytes once the pointer is swapped (inline by finalize's first-content CAS for `bind: "auto"`, or by a later client `bind`). A `pending` version whose finalize never completes, plus its blob, is an orphan: the sidecar best-effort deletes the partial object on a stream/size-constraint error path, and the P2 cleanup engine sweeps the residue (hard sidecar crash between the streamed write and finalize). The `files` row never points at a non-`available` version |
 | `cpt-cf-file-storage-nfr-scalability`           | Designed              | Stateless request path on both planes; shared metadata DB; the control plane is bandwidth-light, the sidecar scales independently on bandwidth; streaming I/O bounds per-request CPU and memory |
 | `cpt-cf-file-storage-nfr-bandwidth`             | Designed              | Per-**sidecar**-instance ingress+egress budget (≥ 2.5 GiB/s combined on 25 GbE) sized so the concurrency target is bandwidth- not CPU-bound; sidecar capacity scales horizontally with stateless replicas; conditional re-reads offloaded to API-Gateway/CDN keyed on the content-only `ETag` the sidecar emits. Models the cost accepted by `cpt-cf-file-storage-adr-sidecar-data-plane`, confined to the sidecar |
 | `cpt-cf-file-storage-nfr-audit-completeness`    | Implemented (write side) | Audit rows are written in the same transaction as each write — every audited mutation and its `audit_outbox` insert commit or roll back together, so there is no window where a write succeeds without its audit row. Not yet covered: a drain/relay from the outbox to a downstream audit sink, and read-path (download/metadata-query) audit logging, both P2/P3 (see the Audit Trail and Read Audit Logging requirements in PRD.md) |
@@ -1841,8 +1858,11 @@ enforced anywhere in code** — a documented extension point, not a shipped capa
   `413`); if **neither** is present, the sidecar imposes **no FS-level size cap** — only the backend's own default size
   limits apply. `max_size` and `exact_size` are mutually exclusive by construction (the control plane never bakes
   both into one token) — this is not independently validated as a "contradiction" at presign or verify time.
-- **`expected_hash`**: `<alg>` MUST be in the backend's allow-list (P1: `SHA-256`), lowercase hex; baked by the control
-  plane (may carry a client-supplied value from the presign request).
+- **`expected_hash`** (`<alg>:<hex>`) is a **reserved** claim: `UploadConstraints` carries the field and the sidecar
+  enforces it (`<alg>` is `SHA-256`, P1's only algorithm; the hex digest is compared case-insensitively with the
+  streamed SHA-256, `400` on mismatch), but no control-plane path sets it today — `create_file`, its idempotent
+  replay and `presign_version` bake only `max_size`, and no REST request field can supply a hash. Upload integrity
+  therefore rests on the control plane's re-verification at finalize.
 - **`max_rate` / `max_conns` are NOT implemented.** No such claims exist on `Claims` and the sidecar enforces no
   per-URL rate/connection cap; this row is retained as a tracked design intent, not a shipped capability.
 
@@ -1919,9 +1939,12 @@ microseconds — no DB hit, no network in the signing step. Two cases:
 - **SDK in-process (private key local to the caller's control instance):** signing is a direct local call, so a caller
   can mint **many URLs at once essentially for free** — e.g. 100 presigned URLs in single-digit milliseconds, no
   round-trips. Useful for listing/galleries that need a signed download URL per item.
-- **Control plane as an external service (SDK over REST):** each presign is a control request, so to mint many URLs
-  the caller **batches** them into a single request (the control plane signs them all in one in-memory pass and
-  returns the set). That keeps bulk presigning to one round-trip — still fast.
+- **Control plane as an external service (SDK over REST):** each presign is its own control request —
+  `GET /files/{id}/download-url` issues one download URL for one file, `POST /files` one upload URL for one new
+  file — and there is no batch route. The signing step adds only tens of microseconds in memory to a request that
+  already does its own authorization and metadata lookup, so the cost per URL is that one round-trip; a
+  listing/gallery that needs a download URL per item issues one `download-url` request per item, which the caller
+  can run concurrently.
 
 ### 4.6 Worked example (LMS image upload and display)
 
@@ -1941,33 +1964,45 @@ mediated by the LMS.
 #### Phase 1 — Upload
 
 1. The student picks `answer.png`. The LMS backend asks the control plane for an upload target via `POST /files`,
-   passing `name`, `mime_type`, `gts_file_type` (required), `owner_kind`/`owner_id`, and optionally a client-known
-   `size`/`hash`: a declared size tightens the token's `exact_size` claim (otherwise a policy-driven `max_size`
-   applies), and a declared hash becomes `expected_hash` — so the sidecar can check the upload against exactly what
-   the client committed. `mime_type` is validated against the actual bytes at finalize (§4.2), not by the sidecar
+   passing `name`, `mime_type`, `gts_file_type` (required) and `owner_kind`/`owner_id`; `bind` is left out, so it
+   defaults to `"auto"`. The request carries no client-known size or hash: the size ceiling the control plane
+   resolves from the tenant/user policy and the backend's limits (when one applies) becomes the token's
+   `max_size` claim. `mime_type` is validated against the actual bytes at finalize (§4.2), not by the sidecar
    in-stream.
 2. The control plane authorizes (`write` on the GTS type), creates the `files` row (`content_id = NULL`),
    pre-registers a `pending` `file_versions` row, and returns `{ file_id, version_id, upload_url }` — an
    `?fs-token=…` URL whose claims follow §4.5's shape (`op: Put`, `file_id`/`version_id`, `backend_id`/
-   `backend_path`, a short `exp`, plus the size/hash constraints from step 1).
+   `backend_path`, a short `exp`, the `max_size` ceiling from step 1, and — because the bind mode is `auto` — a
+   `bind_on_finalize` claim).
 3. The LMS hands `upload_url` to the browser, which `PUT`s the bytes straight to the **sidecar**.
 4. The sidecar verifies the token's signature and claims (§4.5); it applies no tenant/user/backend policy of its
    own and makes no platform-JWT call — those checks already happened at the LMS and at presign.
 5. The sidecar streams to the backend — the object path was already allocated in step 2, so there is no
    sidecar→control pre-register call — counting bytes against `max_size` and hashing incrementally; it does not
    sniff MIME/magic bytes in-stream (that happens on the control plane at finalize).
-6. At end-of-stream the sidecar checks the digest against `expected_hash`, then calls the control plane's
-   token-authenticated **finalize** callback with `{size, hash_hex}`. The control plane re-reads the object,
-   recomputes size/hash, sniffs its magic bytes against the declared MIME, and only then flips the version
-   `pending → available`. Finalize never touches `content_id`.
-7. The sidecar returns `200` to the browser once finalize succeeds. The LMS backend then makes a **separate**
-   `POST /files/{id}/bind { version_id }` request to make the upload the file's live content — no `If-Match` is
-   required for a file's first content. Total for the write: three control-plane requests (presign, finalize,
-   bind) and one data-plane request (the `PUT`).
+6. At end-of-stream the sidecar calls the control plane's token-authenticated **finalize** callback with
+   `{size, hash_hex}`. The control plane re-reads the object, recomputes size/hash, sniffs its magic bytes against
+   the declared MIME, and flips the version `pending → available`. Because the token carries `bind_on_finalize`,
+   the same transaction also binds the version: a compare-and-set that sets `content_id := version_id` only if the
+   file still has no content (`content_id IS NULL`), so this path can never replace existing content. The
+   outcome goes back to the sidecar in the callback response.
+7. The sidecar returns `200` to the browser once finalize succeeds, forwarding the bind outcome as response
+   headers: `X-FS-Bound: true` + `ETag: <new content ETag>` when the compare-and-set won — the upload is now the
+   file's live content, with no separate `bind` call. Total for the write: two client requests (`POST /files` and
+   the `PUT`); finalize is the sidecar's own callback.
 
-> A concurrent write between presign and bind fails the bind's `If-Match` precondition instead; the client re-reads
-> the current ETag and replays `POST /files/{id}/bind` with the fresh `If-Match` — no re-upload, since the
-> version's bytes are already finalized.
+> If the compare-and-set lost — the file already had content when finalize ran, e.g. a concurrent writer bound
+> another version first — the `PUT` still returns `200`, now with `X-FS-Bound: conflict` and
+> `X-FS-Current-ETag: <current ETag>`: the version is `available` but not bound. The LMS backend then calls
+> `POST /files/{id}/bind { version_id }` with `If-Match: <that ETag>` — no re-upload, since the version's bytes
+> are already finalized.
+
+**Manual alternative.** With `bind: "manual"` the token carries no `bind_on_finalize` claim, finalize never touches
+`content_id`, and the `PUT` response carries no `X-FS-Bound` header; the LMS backend makes a separate
+`POST /files/{id}/bind { version_id }` request to make the upload the file's live content. `If-Match` may be
+omitted on the first bind of a file that has no content yet, and is required to rebind already-bound content
+(otherwise `400`). Total for the write: three control-plane requests (presign, finalize, bind) and one data-plane
+request (the `PUT`).
 
 #### Phase 2 — Display in the browser
 
