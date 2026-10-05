@@ -1,5 +1,5 @@
 Created:  2026-07-02 by Constructor Tech
-Updated:  2026-07-02 by Constructor Tech
+Updated:  2026-10-05 by Constructor Tech
 # Feature: Multipart Upload Coordinator
 
 - [x] `p1` - **ID**: `cpt-cf-file-storage-featstatus-multipart-coordinator-implemented`
@@ -404,9 +404,10 @@ regardless of lease state.
 2. [x] - `p1` - **FROM** completing **TO** completing **WHEN** a `complete` call takes over a `completing` session whose `lease_until` has already passed (dead lease owner) - `inst-st-completing-takeover`
 3. [x] - `p1` - **FROM** completing **TO** in_progress **WHEN** the lease holder's assembly/finalize attempt fails (missing parts, size mismatch, policy violation, MIME mismatch, backend error) -- releases the lease so the next `complete` retries immediately - `inst-st-completing-release`
 4. [x] - `p1` - **FROM** completing **TO** completed **WHEN** the lease holder's finalize transaction commits (version `available` [+ bind], `complete_result` persisted, plus the audit row on the fast (first-attempt) path -- a takeover or converge path writes the audit row via a separate step instead) - `inst-st-to-completed`
-5. [x] - `p1` - **FROM** in_progress **TO** aborted **WHEN** abort flow is called explicitly by the client - `inst-st-to-aborted`
-6. [x] - `p1` - **FROM** in_progress **TO** aborted **WHEN** TTL/orphan-reconciliation sweep expires an unfinished session (`cpt-cf-file-storage-fr-orphan-reconciliation`) - `inst-st-ttl-abort`
-7. [x] - `p1` - **FROM** completing **TO** aborted **WHEN** the orphan-reconciliation sweep finds the session's `expires_at` **and** its `lease_until` both already past (a live lease is never reaped mid-assembly) - `inst-st-completing-ttl-abort`
+5. [x] - `p1` - **FROM** in_progress **TO** completed **WHEN** the same finalize transaction as #4 commits, but by the time its own embedded, owner-blind session-close CAS runs the session is observed `in_progress` rather than `completing` -- a *different* completer had taken over the lease in between and then lost its own race, releasing it back to `in_progress` (transition #3) before this call's much earlier finalize attempt finally landed. The version-finalize half of this transaction is fenced only by the version row's own `status` (after the first-statement check that rejects an `aborted` session), never by lease ownership, so this call is already the sole legitimate author of the completion; closing the session here, rather than leaving it stranded `in_progress` under an already-`available` version, completes the same finalize as #4 - `inst-st-in-progress-to-completed`
+6. [x] - `p1` - **FROM** in_progress **TO** aborted **WHEN** abort flow is called explicitly by the client - `inst-st-to-aborted`
+7. [x] - `p1` - **FROM** in_progress **TO** aborted **WHEN** TTL/orphan-reconciliation sweep expires an unfinished session (`cpt-cf-file-storage-fr-orphan-reconciliation`) - `inst-st-ttl-abort`
+8. [x] - `p1` - **FROM** completing **TO** aborted **WHEN** the orphan-reconciliation sweep finds the session's `expires_at` **and** its `lease_until` both already past (a live lease is never reaped mid-assembly) - `inst-st-completing-ttl-abort`
 
 ## 5. Definitions of Done
 

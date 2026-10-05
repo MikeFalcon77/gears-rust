@@ -721,12 +721,14 @@ avoid leaving this unswept sibling behind.
   | `max_conns` | no | **not implemented (planned)** | up/down | — |
   | `content_type` | no | yes | download (`op = get`) | n/a — echoed as `Content-Type`³ |
   | `etag` | no | yes | download (`op = get`) | n/a — echoed as `ETag`³ |
+  | `content_sha256` | no | yes, **full download only** | download (`op = get`) | aborts the response mid-stream⁴ |
 
   `Claims` has no `ip`, `tok.<claim>`, `max_rate`, or `max_conns` field (`infra/signed_url/mod.rs`). The sidecar
   validates only: the token's signature and expiry (`exp`); `op` against the HTTP method; the `file_id`/`version_id`
-  (and, for a multipart part, `upload_id`/`part_number`) binding against the request path; and the upload size/hash
-  constraints (`max_size`/`exact_size`/`expected_hash`) below. It performs no client-address check, no platform-JWT
-  validation of any kind, and no rate/connection limiting.
+  (and, for a multipart part, `upload_id`/`part_number`) binding against the request path; the upload size/hash
+  constraints (`max_size`/`exact_size`/`expected_hash`) below; and, on a full (non-`Range`) download whose token carries
+  `content_sha256`, the streamed body's SHA-256 against that claim (footnote 4). It performs no client-address check,
+  no platform-JWT validation of any kind, and no rate/connection limiting.
 
   ¹ `exact_size` is checked only after the stream fully drains (mismatch → `400`, "size does not match exact_size");
   it can never itself trigger `413` (that's `max_size`'s mid-stream abort, and the two claims are mutually
@@ -738,7 +740,15 @@ avoid leaving this unswept sibling behind.
   stamps both into the claims, so the sidecar (no DB access) can emit the real `Content-Type`/`ETag` response
   headers instead of a generic `application/octet-stream` fallback with no `ETag` at all. `#[serde(default)]` keeps
   verification tolerant of a token minted before these fields existed — such a token still falls back exactly as
-  before. Never populated on upload (`op = put`) or multipart-part (`op = multipart_part`) tokens.
+  before. Never populated on upload (`op = put`) or multipart-part (`op = multipart_part`) tokens.<br>
+  ⁴ `content_sha256` is populated at `download-url` issuance time with the version's hex SHA-256 **only** when its
+  `hash_mode` is `whole-sha256` — a `multipart-composite-sha256` version's stored hash is a Merkle-style root over
+  per-part digests (ADR-0006), not a digest of the assembled object, so it is left empty (no check) for those. It is
+  also empty for a token minted before this claim existed. The sidecar's **full** (non-`Range`) `GET` handler hashes
+  the response body as it streams and compares it to this claim once the stream ends; a mismatch ends the stream in
+  an error instead of a clean completion, so the HTTP connection aborts rather than delivering a seemingly-successful
+  body with the wrong bytes under the token's `ETag`. The sidecar's `Range` handler (S2 above) never performs this
+  check — a partial range's bytes cannot be compared against a digest of the whole object.
 - **`exp` is mandatory, short by default, and hard-capped.** Every issued URL gets a **short default TTL**
   (`default_url_ttl_secs`, minutes — 15 min default) to bound the stale-permission window, and `Issuer::issue`
   **silently clamps** `exp` down to a **hard ceiling** `max_url_ttl_secs` (≤ **7 days** default) rather than refusing
@@ -769,9 +779,10 @@ avoid leaving this unswept sibling behind.
   reported per-part hashes during `complete` (no full assembled-object read-back — only a bounded MIME-sniff read).
   `bind` performs no integrity check of its own — it only swaps `content_id`
   to point at an already-finalized (`Available`) version, guarded by the `If-Match` content-ETag precondition above.
-- **"Baked response headers" claim — not implemented.** The token carries only the two specific `content_type`/`etag`
-  claims (download-only, above); there is no general response-header-set claim and the sidecar does not echo an
-  arbitrary `Content-Disposition`/`Cache-Control`/etc. from the token. See "Response headers" below for what the
+- **"Baked response headers" claim — not implemented.** The token's only response-header claims are the two specific
+  `content_type`/`etag` ones (download-only, above; `content_sha256` is an integrity check, not a header); there is no
+  general response-header-set claim and the sidecar does not echo an arbitrary `Content-Disposition`/`Cache-Control`/etc.
+  from the token. See "Response headers" below for what the
   sidecar actually emits.
 
 ## Conditional headers

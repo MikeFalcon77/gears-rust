@@ -259,7 +259,9 @@ Content access is authorized by a short-lived, opaque **Ed25519-signed compact t
 codec, ADR-0004) that the **control plane alone mints** (holds the private key); the **sidecar only verifies** (holds
 the public key) and can never forge one. The token carries AND-combined claims (`op`, `file_id`, `version_id`,
 `backend_id`, `backend_path`, `exp`, and, for uploads, `max_size`/`exact_size`/`expected_hash`; download tokens also
-carry `content_type`/`etag`) under one signature; it is carried in the URL query (`?fs-token=`) or a header. An
+carry `content_type`/`etag`, plus `content_sha256` for `whole-sha256`-mode versions only — verified end-to-end
+against the full (non-`Range`) response stream, see api.md's "Signed URLs" §claims table) under one signature; it is
+carried in the URL query (`?fs-token=`) or a header. An
 `ip`/CIDR constraint and a token-claim predicate are a documented, not-yet-implemented extension point — `Claims`
 carries no such fields today. Its **format is private to control + sidecar** — everyone else treats it as opaque
 bytes and must not parse it (ADR-0004 "Token Opacity Contract"). Stateless: no DB lookup to verify, no per-token
@@ -494,8 +496,8 @@ against the sidecar. The control plane is the **sole minter** (holds the private
 ##### Responsibility scope
 
 - Mint a token carrying the claims `(op, file_id, version_id, backend_id, backend_path, exp, upload constraints,
-  and, for downloads, content_type/etag)`, signed with the control-plane Ed25519 private key (§4.5). It is returned
-  as a `?fs-token=<token>` URL or to be sent as an `X-FS-Token` header. Because the sidecar has no DB connection
+  and, for downloads, content_type/etag, plus content_sha256 for whole-sha256 versions only)`, signed with the
+  control-plane Ed25519 private key (§4.5). It is returned as a `?fs-token=<token>` URL or to be sent as an `X-FS-Token` header. Because the sidecar has no DB connection
   (§3.8), **`backend_id`/`backend_path` are carried directly in the token** rather than resolved from the version
   row at verify time
 - Resolve the target: for download, the file's current `content_id` (or an explicit `version_id`); for upload, allocate
@@ -1806,15 +1808,16 @@ a literal PASETO library later remains a non-breaking change.
 
 **Claims (inside the token).** `op` (`Get`/`Put`/`MultipartPart`), `file_id`, **`backend_id` and
 `backend_path`**, the version pin `version_id`, `exp`, the constraints (below), plus `request_id` (correlation id)
-and, for `op = Get` tokens, `content_type`/`etag` so the sidecar can emit real `Content-Type`/`ETag` headers.
+and, for `op = Get` tokens, `content_type`/`etag` so the sidecar can emit real `Content-Type`/`ETag` headers, plus
+`content_sha256` (`whole-sha256` versions only) so it can verify a full (non-`Range`) download's body.
 **`backend_id`/`backend_path` are carried in the token** — the sidecar has no DB connection at all (§3.8) and cannot
 resolve them any other way; this is deliberate for sidecar **statelessness**, not an oversight. There is no "baked
 response-header set" claim beyond the specific `content_type`/`etag` fields above — no `Content-Disposition`, no
 `Cache-Control` claim.
 
 **Bound by the signature:** the whole claim-set (op, resource, `backend_id`/`backend_path`, `exp`, constraints,
-`content_type`/`etag`) — one composite signature, so nothing can be added, removed, or weakened. The sidecar
-additionally checks the **HTTP method matches the `op` claim**, so a download token cannot drive an upload (or vice
+`content_type`/`etag`/`content_sha256`) — one composite signature, so nothing can be added, removed, or weakened.
+The sidecar additionally checks the **HTTP method matches the `op` claim**, so a download token cannot drive an upload (or vice
 versa). **Not in the token:** the `Range` header
 (varies per request — free for random access), conditional headers, and the `PUT` body (byte integrity is verified by
 the size/hash claims during the stream and by the read-back hash check at finalize). Consequence: a `PUT` token can be replayed with
