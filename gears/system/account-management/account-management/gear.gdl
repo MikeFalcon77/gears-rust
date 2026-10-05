@@ -32,7 +32,14 @@ gear(
     # under and this gear selects by. Declared, and checked against the sdk: the
     # spec must be a `PluginV1` type it declares, the trait a `pub trait` in it.
     extension_points = [
-        extension_point("cf.core.idp.plugin.v1~", trait = "IdpPluginClient"),
+        # Selected by `idp.vendor` (default "cf", matching static-idp-plugin).
+        # Named, because the config has a second `vendor`: `tr_plugin.vendor`
+        # is what this gear registers under as a tenant-resolver plugin.
+        extension_point(
+            "cf.core.idp.plugin.v1~",
+            trait = "IdpPluginClient",
+            selector = "idp.vendor",
+        ),
     ],
 
     # **Not declared: `implements` for tenant-resolver's point.** This gear can also
