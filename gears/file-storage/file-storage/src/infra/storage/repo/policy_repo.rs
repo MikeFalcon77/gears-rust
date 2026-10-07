@@ -11,7 +11,6 @@ use uuid::Uuid;
 
 use crate::domain::error::DomainError;
 use crate::domain::policy::{PolicyBody, PolicyScope, StoredPolicy};
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::policy::{ActiveModel, Column, Entity, Model};
 
 /// Repository over the `policies` table.
@@ -48,7 +47,7 @@ impl PolicyRepo {
             .scope_with(scope)
             .one(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         model.map(map_model).transpose()
     }
@@ -90,7 +89,7 @@ impl PolicyRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         let policy_id = Uuid::now_v7();
         let body_json = serde_json::to_value(body)
@@ -107,7 +106,7 @@ impl PolicyRepo {
         };
         secure_insert::<Entity>(am, scope, conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(policy_id)
     }
 }

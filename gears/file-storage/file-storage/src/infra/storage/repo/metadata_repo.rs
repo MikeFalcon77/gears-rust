@@ -9,7 +9,6 @@ use uuid::Uuid;
 use file_storage_sdk::CustomMetadataEntry;
 
 use crate::domain::error::DomainError;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::custom_metadata::{ActiveModel, Column, Entity};
 
 /// Repository over the `files_custom_metadata` table.
@@ -36,7 +35,7 @@ impl MetadataRepo {
             .scope_with(scope)
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
@@ -61,7 +60,7 @@ impl MetadataRepo {
         };
         secure_insert::<Entity>(am, scope, conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -83,7 +82,7 @@ impl MetadataRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected > 0)
     }
 }

@@ -8,7 +8,6 @@ use crate::domain::error::DomainError;
 use crate::domain::policy::{
     PolicyBody, PolicyScope, RetentionRuleBody, RetentionScope, StoredPolicy, StoredRetentionRule,
 };
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::repo::InsertRetentionRule;
 use crate::infra::storage::store::Store;
 
@@ -24,7 +23,7 @@ impl Store {
         policy_scope: &PolicyScope,
         scope_owner_id: Option<Uuid>,
     ) -> Result<Option<StoredPolicy>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .policies
             .get(&conn, scope, tenant_id, policy_scope, scope_owner_id)
@@ -94,7 +93,7 @@ impl Store {
         scope: &AccessScope,
         tenant_id: Uuid,
     ) -> Result<Vec<StoredRetentionRule>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .retention_rules
             .list_for_tenant(&conn, scope, tenant_id)
@@ -107,7 +106,7 @@ impl Store {
         scope: &AccessScope,
         rule_id: Uuid,
     ) -> Result<Option<StoredRetentionRule>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos.retention_rules.get(&conn, scope, rule_id).await
     }
 
@@ -121,7 +120,7 @@ impl Store {
         body: &RetentionRuleBody,
         now: OffsetDateTime,
     ) -> Result<Uuid, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .retention_rules
             .insert(
@@ -144,7 +143,7 @@ impl Store {
         scope: &AccessScope,
         rule_id: Uuid,
     ) -> Result<bool, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .retention_rules
             .delete(&conn, scope, rule_id)

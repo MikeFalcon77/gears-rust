@@ -11,7 +11,6 @@ use file_storage_sdk::{File, NewFile, OwnerFilter};
 
 use crate::domain::audit::{AuditEntry, FileEvent};
 use crate::domain::error::DomainError;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::store::{IdempotencyInsert, Store, pending_version};
 
 impl Store {
@@ -23,7 +22,7 @@ impl Store {
         scope: &AccessScope,
         file_id: Uuid,
     ) -> Result<Option<File>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos.files.get(&conn, scope, file_id).await
     }
 
@@ -46,7 +45,7 @@ impl Store {
         limit: u64,
         offset: u64,
     ) -> Result<Vec<File>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .files
             .list(&conn, scope, owner, limit, offset)
@@ -355,7 +354,7 @@ impl Store {
         &self,
         file_id: Uuid,
     ) -> Result<Vec<crate::infra::storage::repo::FileEventRow>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos.events_outbox.list_for_file(&conn, file_id).await
     }
 }

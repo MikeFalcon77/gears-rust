@@ -12,7 +12,6 @@ use uuid::Uuid;
 use file_storage_sdk::{FileVersion, VersionStatus};
 
 use crate::domain::error::DomainError;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::file_version::{ActiveModel, Column, Entity};
 use crate::infra::storage::entity::multipart_upload::{
     Column as MultipartUploadColumn, Entity as MultipartUploadEntity,
@@ -55,7 +54,7 @@ impl VersionRepo {
         };
         secure_insert::<Entity>(am, scope, conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -93,7 +92,7 @@ impl VersionRepo {
             .scope_with(scope)
             .one(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(found.map(Into::into))
     }
 
@@ -115,7 +114,7 @@ impl VersionRepo {
             .scope_with(scope)
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
@@ -142,7 +141,7 @@ impl VersionRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -196,7 +195,7 @@ impl VersionRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected == 1)
     }
 
@@ -219,7 +218,7 @@ impl VersionRepo {
         };
         secure_insert::<ManifestEntity>(am, scope, conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -238,7 +237,7 @@ impl VersionRepo {
             .scope_with(scope)
             .one(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(found.map(|m| m.manifest))
     }
 
@@ -261,7 +260,7 @@ impl VersionRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -284,7 +283,7 @@ impl VersionRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -319,7 +318,7 @@ impl VersionRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected)
     }
 
@@ -351,7 +350,7 @@ impl VersionRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected > 0)
     }
 
@@ -399,7 +398,7 @@ impl VersionRepo {
             .scope_with(scope)
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
@@ -441,7 +440,7 @@ impl VersionRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected > 0)
     }
 }

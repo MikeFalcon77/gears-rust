@@ -9,7 +9,6 @@ use file_storage_sdk::CustomMetadataPatch;
 
 use crate::domain::audit::AuditEntry;
 use crate::domain::error::DomainError;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::store::Store;
 
 impl Store {
@@ -20,7 +19,7 @@ impl Store {
         &self,
         file_id: Uuid,
     ) -> Result<Vec<CustomMetadataEntry>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .metadata
             .list(&conn, &AccessScope::allow_all(), file_id)

@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 use crate::domain::error::DomainError;
 use crate::domain::idempotency::IdempotencyRecord;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::idempotency_key::{ActiveModel, Column, Entity, Model};
 use crate::infra::storage::store::IdempotencyInsert;
 
@@ -49,7 +48,7 @@ impl IdempotencyRepo {
             .scope_with(&AccessScope::allow_all())
             .one(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(found.map(record_from_model))
     }
 
@@ -94,7 +93,7 @@ impl IdempotencyRepo {
             .scope_with(&AccessScope::allow_all())
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         let am = ActiveModel {
             tenant_id: Set(idem.tenant_id),
@@ -112,7 +111,7 @@ impl IdempotencyRepo {
         };
         secure_insert::<Entity>(am, &AccessScope::allow_all(), conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -133,7 +132,7 @@ impl IdempotencyRepo {
             .scope_with(&AccessScope::allow_all())
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected)
     }
 }

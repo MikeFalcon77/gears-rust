@@ -7,6 +7,7 @@
 //! stays dependency-light while the infra coupling is confined to this small,
 //! rarely-imported module.
 
+use sea_orm::DbErr;
 use toolkit_db::DbError;
 use toolkit_db::secure::ScopeError;
 
@@ -22,6 +23,13 @@ impl From<DbError> for DomainError {
 #[allow(unknown_lints, de1302_error_from_to_string)]
 impl From<ScopeError> for DomainError {
     fn from(e: ScopeError) -> Self {
+        Self::database(e.to_string())
+    }
+}
+
+#[allow(unknown_lints, de1302_error_from_to_string)]
+impl From<DbErr> for DomainError {
+    fn from(e: DbErr) -> Self {
         Self::database(e.to_string())
     }
 }

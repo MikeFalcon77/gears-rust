@@ -6,7 +6,6 @@ use uuid::Uuid;
 use crate::domain::audit::AuditEntry;
 use crate::domain::error::DomainError;
 use crate::domain::multipart::{MultipartPart, MultipartUploadSession};
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::store::Store;
 
 impl Store {
@@ -28,7 +27,7 @@ impl Store {
         expires_at: OffsetDateTime,
         now: OffsetDateTime,
     ) -> Result<(), DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .multipart
             .create(
@@ -53,7 +52,7 @@ impl Store {
         &self,
         upload_id: Uuid,
     ) -> Result<Option<MultipartUploadSession>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos.multipart.get(&conn, upload_id).await
     }
 
@@ -70,7 +69,7 @@ impl Store {
         size: i64,
         now: OffsetDateTime,
     ) -> Result<(), DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .multipart
             .upsert_part(
@@ -96,7 +95,7 @@ impl Store {
         &self,
         file_id: Uuid,
     ) -> Result<bool, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .multipart
             .has_in_progress_for_file(&conn, file_id)
@@ -114,7 +113,7 @@ impl Store {
         upload_id: Uuid,
         expires_at: OffsetDateTime,
     ) -> Result<(), DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .multipart
             .set_expires_at(&conn, upload_id, expires_at)
@@ -128,7 +127,7 @@ impl Store {
         &self,
         upload_id: Uuid,
     ) -> Result<Vec<MultipartPart>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos.multipart.list_parts(&conn, upload_id).await
     }
 

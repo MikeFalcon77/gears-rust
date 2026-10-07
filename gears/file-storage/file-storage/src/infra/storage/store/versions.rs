@@ -14,7 +14,6 @@ use file_storage_sdk::{File, FileVersion, VersionStatus};
 use crate::domain::audit::{AuditEntry, FileEvent};
 use crate::domain::error::DomainError;
 use crate::infra::content::hash_mode::HashMode;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::store::{Store, pending_version};
 
 /// Sentinel "no limit" passed to [`crate::infra::storage::repo::VersionRepo::list_by_file`]
@@ -43,7 +42,7 @@ impl Store {
         backend_path: &str,
         now: OffsetDateTime,
     ) -> Result<(), DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         let pending = pending_version(
             file_id,
             version_id,
@@ -64,7 +63,7 @@ impl Store {
         file_id: Uuid,
         version_id: Uuid,
     ) -> Result<Option<FileVersion>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .versions
             .get(&conn, &AccessScope::allow_all(), file_id, version_id)
@@ -76,7 +75,7 @@ impl Store {
     /// [`UNBOUNDED_VERSIONS`]). The paginated, REST-facing counterpart is
     /// [`Self::list_versions_page`] (P2 2.2).
     pub async fn list_versions(&self, file_id: Uuid) -> Result<Vec<FileVersion>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .versions
             .list_by_file(
@@ -99,7 +98,7 @@ impl Store {
         limit: u64,
         offset: u64,
     ) -> Result<Vec<FileVersion>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .versions
             .list_by_file(&conn, &AccessScope::allow_all(), file_id, limit, offset)
@@ -202,7 +201,7 @@ impl Store {
         &self,
         version_id: Uuid,
     ) -> Result<Option<String>, DomainError> {
-        let conn = self.db.conn().map_err(db_err)?;
+        let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
             .versions
             .get_manifest(&conn, &AccessScope::allow_all(), version_id)

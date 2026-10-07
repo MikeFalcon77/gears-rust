@@ -9,7 +9,6 @@ use uuid::Uuid;
 
 use crate::domain::audit::FileEvent;
 use crate::domain::error::DomainError;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::events_outbox::{ActiveModel, Column, Entity, Model};
 
 /// Repository over the `events_outbox` table.
@@ -44,7 +43,7 @@ impl EventsOutboxRepo {
         // No tenant scope on this table — allow_all() is intentional.
         secure_insert::<Entity>(am, &AccessScope::allow_all(), conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -63,7 +62,7 @@ impl EventsOutboxRepo {
             .scope_with(&AccessScope::allow_all())
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(rows)
     }
 }

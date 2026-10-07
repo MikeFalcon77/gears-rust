@@ -14,7 +14,6 @@ use uuid::Uuid;
 
 use crate::domain::error::DomainError;
 use crate::domain::multipart::{MultipartPart, MultipartUploadSession, MultipartUploadState};
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::multipart_upload::{
     ActiveModel as UploadActiveModel, Column as UploadColumn, Entity as UploadEntity,
     Model as UploadModel,
@@ -68,7 +67,7 @@ impl MultipartRepo {
         // No tenant scope on this table — allow_all() is correct here.
         secure_insert::<UploadEntity>(am, &AccessScope::allow_all(), conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -84,7 +83,7 @@ impl MultipartRepo {
             .scope_with(&AccessScope::allow_all())
             .one(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         found.map(session_from_model).transpose()
     }
 
@@ -125,7 +124,7 @@ impl MultipartRepo {
             .scope_with(&AccessScope::allow_all())
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected > 0)
     }
 
@@ -165,7 +164,7 @@ impl MultipartRepo {
             .scope_with(&AccessScope::allow_all())
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -193,7 +192,7 @@ impl MultipartRepo {
             .scope_with(&AccessScope::allow_all())
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         let am = PartActiveModel {
             upload_id: Set(upload_id),
@@ -205,7 +204,7 @@ impl MultipartRepo {
         };
         secure_insert::<PartEntity>(am, &AccessScope::allow_all(), conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(())
     }
 
@@ -222,7 +221,7 @@ impl MultipartRepo {
             .scope_with(&AccessScope::allow_all())
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         rows.into_iter().map(part_from_model).collect()
     }
 
@@ -246,7 +245,7 @@ impl MultipartRepo {
             .scope_with(&AccessScope::allow_all())
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         rows.into_iter().map(session_from_model).collect()
     }
 
@@ -276,7 +275,7 @@ impl MultipartRepo {
             .scope_with(&AccessScope::allow_all())
             .count(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(count > 0)
     }
 }

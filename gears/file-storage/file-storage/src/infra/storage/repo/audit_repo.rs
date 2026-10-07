@@ -18,7 +18,6 @@ use uuid::Uuid;
 
 use crate::domain::audit::AuditEntry;
 use crate::domain::error::DomainError;
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::audit_outbox::{ActiveModel, Column, Entity};
 
 /// Repository over the `audit_outbox` table.
@@ -59,7 +58,7 @@ impl AuditRepo {
         // No tenant scope on this table — allow_all() is intentional.
         secure_insert::<Entity>(am, &AccessScope::allow_all(), conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         // @cpt-end:cpt-cf-file-storage-algo-audit-trail-build-entry:p1:inst-buildentry-insert
         // @cpt-begin:cpt-cf-file-storage-algo-audit-trail-build-entry:p1:inst-buildentry-return
         Ok(())
@@ -82,7 +81,7 @@ impl AuditRepo {
             .scope_with(&AccessScope::allow_all())
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(rows)
     }
 }

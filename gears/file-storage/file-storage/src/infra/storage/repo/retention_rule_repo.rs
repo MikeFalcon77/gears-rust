@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use crate::domain::error::DomainError;
 use crate::domain::policy::{RetentionRuleBody, RetentionScope, StoredRetentionRule};
-use crate::infra::storage::db::db_err;
 use crate::infra::storage::entity::retention_rule::{ActiveModel, Column, Entity, Model};
 
 use super::InsertRetentionRule;
@@ -35,7 +34,7 @@ impl RetentionRuleRepo {
             .scope_with(scope)
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         rows.into_iter().map(map_model).collect()
     }
@@ -53,7 +52,7 @@ impl RetentionRuleRepo {
             .scope_with(scope)
             .one(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         model.map(map_model).transpose()
     }
@@ -79,7 +78,7 @@ impl RetentionRuleRepo {
         };
         secure_insert::<Entity>(am, scope, conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(rule_id)
     }
 
@@ -103,7 +102,7 @@ impl RetentionRuleRepo {
             .scope_with(scope)
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         rows.into_iter().map(map_model).collect()
     }
@@ -122,7 +121,7 @@ impl RetentionRuleRepo {
             .scope_with(scope)
             .all(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
 
         rows.into_iter().map(map_model).collect()
     }
@@ -140,7 +139,7 @@ impl RetentionRuleRepo {
             .scope_with(scope)
             .exec(conn)
             .await
-            .map_err(db_err)?;
+            .map_err(DomainError::from)?;
         Ok(res.rows_affected > 0)
     }
 }
