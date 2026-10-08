@@ -39,9 +39,7 @@ impl MetadataRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// Upsert one key (delete-then-insert; merge-patch semantics live in the
-    /// service). Custom-metadata writes never carry tenant data of their own —
-    /// the parent file is already authorized.
+    /// Upsert one key (delete-then-insert; merge-patch semantics live in the service).
     pub async fn upsert<C: DBRunner>(
         &self,
         conn: &C,

@@ -1,17 +1,12 @@
 //! Policy domain types and the `PolicyResolver`.
 //!
-//! The resolver computes the **effective policy = most-restrictive across
-//! tenant + user** per aspect, as required by the PRD. Enforcement on uploads
-//! (allowed-MIME check, effective size limit, metadata limits, quota) is
-//! active in `domain/service/create.rs`; this module only stores and resolves
-//! the policy itself.
+//! The resolver computes the effective policy as the most-restrictive combination of
+//! tenant and user levels per aspect. Upload enforcement lives in `domain/service/create.rs`.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use toolkit_macros::domain_model;
 use uuid::Uuid;
-
-// ── Policy scope / owner ───────────────────────────────────────────────────────
 
 /// Identifies whether a policy row applies to the whole tenant or a single user.
 #[domain_model]
@@ -74,12 +69,7 @@ impl RetentionScope {
     }
 }
 
-// ── Policy body ───────────────────────────────────────────────────────────────
-
 /// Per-mime-type size limit override.
-///
-/// Part of `cpt-cf-file-storage-fr-size-limits-policy`:
-/// "optional per-mime-type overrides (e.g., 100 MB general, 1 GB for `video/*`)".
 #[domain_model]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MimeSizeOverride {
@@ -89,11 +79,7 @@ pub struct MimeSizeOverride {
     pub max_bytes: u64,
 }
 
-/// Size limits portion of a policy body.
-///
-/// `cpt-cf-file-storage-fr-size-limits-policy`: tenants and users define a
-/// global maximum size and optional per-mime-type overrides. The most-restrictive
-/// value wins across tenant and user levels.
+/// Size limits portion of a policy body: a global maximum and optional per-mime overrides.
 #[domain_model]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SizeLimits {
@@ -105,9 +91,6 @@ pub struct SizeLimits {
 }
 
 /// Metadata limits portion of a policy body.
-///
-/// `cpt-cf-file-storage-fr-metadata-limits`: maximum number of key-value pairs,
-/// maximum key length, maximum value length, maximum total metadata size.
 #[allow(clippy::struct_field_names)]
 #[domain_model]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -124,8 +107,7 @@ pub struct MetadataLimits {
 
 /// The JSON body stored in the `policies.body` column.
 ///
-/// Holds the allowed mime types, size limits, metadata limits, and enabled event
-/// types for a single scope (tenant or user).
+/// Allowed mime types, size limits, metadata limits and enabled event types for one scope.
 #[domain_model]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PolicyBody {
@@ -142,13 +124,10 @@ pub struct PolicyBody {
     #[serde(default)]
     pub metadata_limits: MetadataLimits,
 
-    /// Enabled event types for the `EventBroker` (M2/M0 will use this).
-    /// An empty list means no events are enabled at this level.
+    /// Enabled event types; an empty list means none at this level.
     #[serde(default)]
     pub enabled_event_types: Vec<String>,
 }
-
-// ── Retention rule body ───────────────────────────────────────────────────────
 
 /// Criteria for age-based retention (delete files older than `max_age_days`).
 #[domain_model]
@@ -162,13 +141,8 @@ pub struct AgeRetention {
 #[domain_model]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct InactivityRetention {
-    /// Delete files not **modified** in this many days, evaluated against
-    /// `last_modified_at` (bumped only by writes — bind/patch/transfer).
-    /// Downloads do not reset this clock: a file read frequently but never
-    /// rewritten is still eligible for deletion after `inactivity_days`.
-    /// Follow-up: track a `last_accessed_at` timestamp updated on download if
-    /// read-awareness becomes a requirement (needs a throttled/coarse update
-    /// to avoid a hot-path write on every read).
+    /// Delete files not **modified** in this many days (`last_modified_at`, bumped only by
+    /// writes: bind/patch/transfer). Downloads do not reset this clock.
     pub inactivity_days: u32,
 }
 
@@ -185,8 +159,7 @@ pub struct MetadataRetention {
 
 /// The JSON body stored in the `retention_rules.body` column.
 ///
-/// A rule may specify one or more criteria; any matching criterion triggers
-/// expiry (OR semantics). `cpt-cf-file-storage-fr-retention-policies`.
+/// A rule may specify several criteria; any matching criterion triggers expiry (OR).
 #[domain_model]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RetentionRuleBody {
@@ -202,8 +175,6 @@ pub struct RetentionRuleBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<MetadataRetention>,
 }
-
-// ── Policy row (domain view) ──────────────────────────────────────────────────
 
 /// A stored policy row, as returned by the `PolicyRepo`.
 #[allow(unknown_lints, de0309_must_have_domain_model)]
@@ -232,30 +203,23 @@ pub struct StoredRetentionRule {
     pub created_at: OffsetDateTime,
 }
 
-// ── Effective policy (resolved) ───────────────────────────────────────────────
-
 /// The fully resolved effective policy for a request context, computed by
 /// [`PolicyResolver`] as the most-restrictive combination of tenant + user levels.
 #[allow(unknown_lints, de0309_must_have_domain_model)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectivePolicy {
-    /// Intersection of allowed mime types from tenant and user policies.
-    /// `None` means "all types allowed" (no restriction from any level).
-    /// An empty `Vec` means "no types allowed" (total restriction).
+    /// Intersection of allowed mime types. `None` = all allowed; empty `Vec` = none allowed.
     pub allowed_mime_types: Option<Vec<String>>,
 
     /// Most-restrictive global size limit in bytes. `None` = unlimited.
     pub max_bytes: Option<u64>,
 
-    /// Per-mime size overrides, merged from all levels (most restrictive wins
-    /// per mime pattern).
+    /// Per-mime size overrides merged across levels (most restrictive per pattern).
     pub per_mime_max_bytes: Vec<MimeSizeOverride>,
 
-    /// Most-restrictive metadata limits (smallest non-None value from each level).
+    /// Most-restrictive metadata limits (smallest non-None value per field).
     pub metadata_limits: MetadataLimits,
 }
-
-// ── PolicyResolver ─────────────────────────────────────────────────────────────
 
 /// Computes the effective policy for a file request context from a tenant-level
 /// policy and an optional user-level policy.
@@ -271,40 +235,27 @@ pub struct EffectivePolicy {
 pub struct PolicyResolver;
 
 impl PolicyResolver {
-    /// Compute the effective policy from an optional tenant-level policy body
-    /// and an optional user-level policy body.
-    ///
-    /// Either argument may be `None` (meaning "no policy defined at that level",
-    /// which contributes no restrictions). When both are `None`, the returned
-    /// `EffectivePolicy` is fully permissive (no restrictions).
+    /// Compute the effective policy; a `None` level contributes no restrictions.
     #[must_use]
     pub fn resolve(
         tenant_policy: Option<&PolicyBody>,
         user_policy: Option<&PolicyBody>,
     ) -> EffectivePolicy {
-        // ── Allowed mime types ────────────────────────────────────────────────
-        // Most-restrictive-wins: intersection across levels.
-        // Empty allowed_mime_types in a PolicyBody means "no restriction at this
-        // level" — not "nothing allowed". A level is "restricted" only when its
-        // allowed_mime_types is non-empty.
+        // An empty `allowed_mime_types` means "no restriction at this level", not "nothing".
         let allowed_mime_types = Self::merge_allowed_mimes(
             tenant_policy.map(|p| &p.allowed_mime_types),
             user_policy.map(|p| &p.allowed_mime_types),
         );
 
-        // ── Global size limit ─────────────────────────────────────────────────
-        // Most-restrictive = smallest non-None value.
         let tenant_max = tenant_policy.and_then(|p| p.size_limits.max_bytes);
         let user_max = user_policy.and_then(|p| p.size_limits.max_bytes);
         let max_bytes = Self::min_option(tenant_max, user_max);
 
-        // ── Per-mime size overrides ───────────────────────────────────────────
         let empty: &[MimeSizeOverride] = &[];
         let tenant_per_mime = tenant_policy.map_or(empty, |p| p.size_limits.per_mime.as_slice());
         let user_per_mime = user_policy.map_or(empty, |p| p.size_limits.per_mime.as_slice());
         let per_mime_max_bytes = Self::merge_per_mime(tenant_per_mime, user_per_mime);
 
-        // ── Metadata limits ───────────────────────────────────────────────────
         let t_meta = tenant_policy.map(|p| &p.metadata_limits);
         let u_meta = user_policy.map(|p| &p.metadata_limits);
         let metadata_limits = Self::merge_metadata_limits(t_meta, u_meta);
@@ -317,11 +268,8 @@ impl PolicyResolver {
         }
     }
 
-    /// Intersection of allowed mime types.
-    ///
-    /// - Both unrestricted (empty list or None) => None (no restriction).
-    /// - One unrestricted + one restricted => the restricted set wins.
-    /// - Both restricted => intersection of the two sets.
+    /// Intersection of allowed mime types; an unrestricted level (empty or `None`) defers
+    /// to the other.
     fn merge_allowed_mimes(
         tenant: Option<&Vec<String>>,
         user: Option<&Vec<String>>,
@@ -334,10 +282,8 @@ impl PolicyResolver {
             (Some(t), None) => Some(t.clone()),
             (None, Some(u)) => Some(u.clone()),
             (Some(t), Some(u)) => {
-                // Intersection, resolved to the NARROWER pattern for asymmetric
-                // wildcard overlaps: tenant `image/*` ∩ user `image/png` yields
-                // `image/png`, not `image/*` (which would wrongly keep admitting
-                // `image/jpeg` once the list is enforced as an allow-list).
+                // Narrower pattern wins: `image/*` ∩ `image/png` is `image/png`, not
+                // `image/*` (which would still admit `image/jpeg`).
                 let mut intersection: Vec<String> = Vec::new();
                 for t_mt in t {
                     for u_mt in u {
@@ -353,9 +299,7 @@ impl PolicyResolver {
         }
     }
 
-    /// Intersect two mime patterns: return the **narrower** pattern when they
-    /// overlap, or `None` when they are disjoint. `image/*` ∩ `image/png` =
-    /// `image/png`; `image/png` ∩ `image/jpeg` = `None`.
+    /// Narrower of two overlapping mime patterns, or `None` when disjoint.
     fn intersect_mime(a: &str, b: &str) -> Option<String> {
         if a == b {
             return Some(a.to_owned());
@@ -369,7 +313,6 @@ impl PolicyResolver {
             ("*", "*") => Some(a.to_owned()),
             ("*", _) => Some(b.to_owned()),
             (_, "*") => Some(a.to_owned()),
-            // Two different concrete subtypes under the same base type: disjoint.
             _ => None,
         }
     }
@@ -381,7 +324,7 @@ impl PolicyResolver {
         (base, sub)
     }
 
-    /// Return the smallest of two `Option<u64>` values (`None` = unlimited).
+    /// Smallest of two limits (`None` = unlimited).
     fn min_option(a: Option<u64>, b: Option<u64>) -> Option<u64> {
         match (a, b) {
             (None, None) => None,
@@ -390,20 +333,15 @@ impl PolicyResolver {
         }
     }
 
-    /// Merge per-mime overrides: union of patterns, most-restrictive value per
-    /// pattern, and — critically — collapse *overlapping* patterns so a broader
-    /// wildcard cap always tightens the more-specific entries it covers.
-    ///
-    /// Consumers pick the most-specific matching entry, so without the final
-    /// tightening pass `image/png = 50MB` alongside `image/* = 10MB` would let a
-    /// PNG upload use 50MB and silently ignore the stricter 10MB wildcard cap.
+    /// Union of patterns with the smallest value per pattern, then tightened so a broader
+    /// wildcard cap also caps the more-specific entries it covers (consumers pick the
+    /// most specific entry, so `image/png = 50MB` would otherwise ignore `image/* = 10MB`).
     fn merge_per_mime(
         tenant: &[MimeSizeOverride],
         user: &[MimeSizeOverride],
     ) -> Vec<MimeSizeOverride> {
         let mut result: Vec<MimeSizeOverride> = tenant.to_vec();
 
-        // 1. Union: for an identical pattern take the smaller value, else add.
         for u in user {
             if let Some(existing) = result.iter_mut().find(|e| e.mime == u.mime) {
                 existing.max_bytes = existing.max_bytes.min(u.max_bytes);
@@ -412,8 +350,6 @@ impl PolicyResolver {
             }
         }
 
-        // 2. Tighten each entry by every *broader* pattern that also covers it,
-        //    so a specific entry can never be looser than a matching wildcard.
         let snapshot = result.clone();
         for e in &mut result {
             for o in &snapshot {
@@ -426,9 +362,7 @@ impl PolicyResolver {
         result
     }
 
-    /// Does `pattern` cover `other` — i.e. does every concrete mime matching
-    /// `other` also match `pattern`? True for exact equality or a `type/*`
-    /// wildcard over the same base type.
+    /// True if every mime matching `other` also matches `pattern` (equal, or `type/*`).
     fn mime_pattern_covers(pattern: &str, other: &str) -> bool {
         if pattern == other {
             return true;
@@ -438,7 +372,6 @@ impl PolicyResolver {
         p_type == o_type && p_sub == "*"
     }
 
-    /// Merge metadata limits: smallest non-None value from each field.
     #[allow(clippy::struct_field_names)]
     fn merge_metadata_limits(
         tenant: Option<&MetadataLimits>,
@@ -473,20 +406,15 @@ impl PolicyResolver {
     }
 }
 
-// ── Pure policy-enforcement helpers ───────────────────────────────────────────
-
 impl PolicyResolver {
-    /// Returns `true` if `mime_type` matches any pattern in `allowed`.
-    /// Supports exact match and `*` wildcard for subtype (e.g. `"image/*"`).
-    /// A pattern without a `/` (e.g. `"image"`) is malformed and never matches.
+    /// True if `mime_type` matches any pattern in `allowed` (exact or `type/*`).
+    /// A pattern without a `/` is malformed and never matches.
     #[must_use]
     pub(crate) fn mime_allowed(mime_type: &str, allowed: &[String]) -> bool {
         allowed.iter().any(|pat| {
             if pat == mime_type {
                 return true;
             }
-            // wildcard subtype: "image/*" matches "image/jpeg".
-            // A pattern without a `/` is malformed and must not act as a wildcard.
             let Some((pt, ps)) = pat.split_once('/') else {
                 return false;
             };
@@ -497,17 +425,13 @@ impl PolicyResolver {
         })
     }
 
-    /// Check that `mime_type` is permitted by the effective policy.
-    ///
-    /// - `None` `allowed_mime_types` → all types permitted (no restriction).
-    /// - `Some([])` → nothing permitted.
-    /// - `Some(list)` → must match a pattern in the list.
+    /// Check that `mime_type` is permitted (`None` = all, `Some([])` = nothing).
     pub(crate) fn check_allowed_mime(
         policy: &EffectivePolicy,
         mime_type: &str,
     ) -> Result<(), crate::domain::error::DomainError> {
         let Some(allowed) = &policy.allowed_mime_types else {
-            return Ok(()); // no restriction
+            return Ok(());
         };
         if Self::mime_allowed(mime_type, allowed) {
             Ok(())
@@ -518,13 +442,8 @@ impl PolicyResolver {
         }
     }
 
-    /// Compute the effective maximum blob size for `mime_type`, taking the most
-    /// restrictive of:
-    ///   1. Backend hardware ceiling (`backend_max`).
-    ///   2. Policy global limit (`EffectivePolicy.max_bytes`).
-    ///   3. Policy per-mime override (`EffectivePolicy.per_mime_max_bytes`).
-    ///
-    /// `None` means unbounded from all sources.
+    /// Effective maximum blob size: the minimum of the backend ceiling, the policy global
+    /// limit and the per-mime override. `None` = unbounded.
     #[must_use]
     pub(crate) fn compute_effective_max_bytes(
         policy: &EffectivePolicy,
@@ -533,7 +452,6 @@ impl PolicyResolver {
     ) -> Option<u64> {
         let policy_global = policy.max_bytes;
 
-        // Find the most specific per-mime override that matches.
         let per_mime_max: Option<u64> = policy
             .per_mime_max_bytes
             .iter()
@@ -541,14 +459,13 @@ impl PolicyResolver {
             .map(|o| o.max_bytes)
             .reduce(u64::min);
 
-        // Most restrictive = minimum of all non-None ceilings.
         [backend_max, policy_global, per_mime_max]
             .into_iter()
             .flatten()
             .reduce(u64::min)
     }
 
-    /// Validate `entries` against the metadata limits in `policy`.
+    /// Validate `entries` against the policy's metadata limits.
     pub(crate) fn check_metadata_limits(
         policy: &EffectivePolicy,
         entries: &[(String, String)],

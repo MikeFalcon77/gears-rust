@@ -1,17 +1,6 @@
-//! `PolicyService` — policy and retention-rule administration.
-//!
-//! Owns the P2-M1 flows: read/upsert policy for tenant and user scopes,
-//! compute effective policy, and manage retention rules. Extracted from
-//! `FileService` to reduce its Henry-Kafura coupling score.
-//!
-//! `PolicyService` holds its own copies of the shared dependencies (`Store`
-//! via `PolicyStore`, `Authorizer`) so it does NOT reference `FileService` —
-//! that keeps the fan-in graph clean and avoids raising the HK score of
-//! `FileService`.
-//!
-//! The inline policy *enforcement* used by core file ops (create/finalize/bind/
-//! update_metadata) stays in `FileService` — only the standalone admin/management
-//! surface moves here.
+//! `PolicyService` — policy and retention-rule administration (read/upsert policy,
+//! effective policy, retention rules). Inline policy *enforcement* on core file ops
+//! stays in `FileService`.
 
 // Domain terms (ETag, If-Match, FileStorage, GET/PUT) recur throughout the docs.
 #![allow(clippy::doc_markdown)]
@@ -30,12 +19,7 @@ use crate::domain::policy::{
 };
 use crate::domain::ports::PolicyStore;
 
-/// The policy and retention-rule administration service (P2-M1).
-///
-/// Extracted from `FileService` to reduce its Henry-Kafura coupling score.
-/// All standalone policy and retention-rule operations live here; the struct
-/// is wired alongside `FileService` in `gear.rs` and served under the same
-/// REST prefix.
+/// The policy and retention-rule administration service.
 #[allow(unknown_lints, de0309_must_have_domain_model)]
 pub struct PolicyService {
     store: Arc<dyn PolicyStore>,
@@ -46,8 +30,6 @@ impl PolicyService {
     pub fn new(store: Arc<dyn PolicyStore>, authorizer: Arc<dyn Authorizer>) -> Self {
         Self { store, authorizer }
     }
-
-    // ── policy management (P2-M1) ─────────────────────────────────────────────
 
     /// Get the raw (own-level) policy body for a scope, if one has been set.
     pub async fn get_own_policy(
@@ -78,10 +60,7 @@ impl PolicyService {
         scope_owner_id: Option<Uuid>,
         body: PolicyBody,
     ) -> Result<StoredPolicy, DomainError> {
-        // Tenant-scope requests (`scope_owner_id == None`) stay gated on plain
-        // `WRITE` — there is no "owner" to compare at tenant scope. Tightening
-        // tenant-scope writes to require `ADMIN_POLICY` as well is a follow-up
-        // the team may choose to make; not mandated here.
+        // Tenant scope (`scope_owner_id == None`) has no owner to compare; plain `WRITE` gates it.
         let scope = self
             .authorize_scope_owner(ctx, actions::WRITE, scope_owner_id)
             .await?;
@@ -104,8 +83,7 @@ impl PolicyService {
         })
     }
 
-    /// Compute the effective policy for the current caller context, combining
-    /// the tenant-level and user-level policies with most-restrictive-wins.
+    /// Effective policy for the caller: tenant and user levels, most-restrictive-wins.
     pub async fn get_effective_policy(
         &self,
         ctx: &SecurityContext,
@@ -191,13 +169,8 @@ impl PolicyService {
         ctx: &SecurityContext,
         rule_id: Uuid,
     ) -> Result<bool, DomainError> {
-        // Fetch-then-reauthorize: a bare `rule_id` carries no ownership
-        // information, so the coarse `DELETE, "", None` check alone would let
-        // any tenant member delete any other member's retention rule. Resolve
-        // the rule's scope/target first (via `allow_all` — this is a read used
-        // only to make the authorization decision below, mirroring the
-        // `require_file` prefetch pattern already used elsewhere in this gear),
-        // then re-run the same scope-based check `create_retention_rule` uses.
+        // A bare `rule_id` carries no ownership, so fetch the rule (via `allow_all`, only to
+        // decide authorization) and re-run the scope check `create_retention_rule` uses.
         let rule = self
             .store
             .get_retention_rule(&AccessScope::allow_all(), rule_id)
@@ -209,27 +182,10 @@ impl PolicyService {
         self.store.delete_retention_rule(&scope, rule_id).await
     }
 
-    // ── semantic validation (P2 remediation 0.11) ───────────────────────────────
-
-    /// Reject a retention-rule body that would be dangerous or dead on write,
-    /// rather than letting it be silently accepted and later executed (or
-    /// silently never executed) by the sweep.
-    ///
-    /// - All of `age`/`inactivity`/`metadata` `None`: the rule can never match
-    ///   any file — almost certainly a mistake.
-    /// - `age.max_age_days == 0` or `inactivity.inactivity_days == 0`: matches
-    ///   *every* file in the tenant on the very next sweep tick (the age check in
-    ///   `cleanup.rs`'s `rule_matches` is `now - created_at > Duration::days(0)`,
-    ///   true for any file at all), permanently deleting rows **and** blobs with
-    ///   no dry-run and no undo. If an "expire everything now" operation is ever
-    ///   a real need, it must be an explicit, separately-authorized admin
-    ///   action — never a normal retention rule.
-    /// - `scope` ∈ {`user`, `file`} with `scope_target_id = None`: a dead rule
-    ///   that can never resolve to a target file. `File`-scope already fails
-    ///   earlier in `authorize_retention_scope` (which requires the target to
-    ///   resolve a real file), but `User`-scope only rejects a missing target
-    ///   for non-`ADMIN_POLICY` callers, so this closes the same gap for an
-    ///   admin caller.
+    /// Reject a retention-rule body that is dead or dangerous on write: no criteria, a
+    /// zero `age`/`inactivity` day count (matches every file in the tenant on the next
+    /// sweep run, deleting rows and blobs irreversibly), or `user`/`file` scope without a
+    /// target (also closes the gap for `ADMIN_POLICY` callers in `authorize_retention_scope`).
     fn validate_retention_rule(
         scope: &RetentionScope,
         scope_target_id: Option<Uuid>,
@@ -267,24 +223,13 @@ impl PolicyService {
         Ok(())
     }
 
-    /// Reject a policy body that would be dangerous or dead on write.
+    /// Reject a policy body that is dead or dangerous on write.
     ///
-    /// - `scope = User` with `scope_owner_id = None`: the effective-policy
-    ///   reader (`FileService::get_effective_policy_internal`,
-    ///   `create.rs:40-43`) always queries the user-scope row with
-    ///   `Some(owner_id)` — a `None`-owner user-scope row can never be read
-    ///   back, so it is a dead row from the moment it is written.
-    /// - a `*/*` entry in `allowed_mime_types` or `size_limits.per_mime`: the
-    ///   wildcard matcher (`PolicyResolver::mime_allowed`) only special-cases
-    ///   the *subtype* half of a pattern (`"image/*"`), so `*/*` splits into
-    ///   `pt = "*"`, and `pt == mt` is never true for a real mime type — it
-    ///   silently matches nothing, acting as an accidental deny-all rather
-    ///   than the "allow everything" the caller almost certainly intended.
-    ///   Rejected outright (simpler and safer than teaching the matcher a
-    ///   second wildcard meaning): a caller that wants "no restriction" should
-    ///   omit `allowed_mime_types` entirely (`None`/empty already means
-    ///   unrestricted), and a caller that wants "no per-mime override" should
-    ///   omit the `per_mime` entry.
+    /// - `User` scope without `scope_owner_id`: the reader always queries with
+    ///   `Some(owner_id)`, so such a row could never be read back.
+    /// - `*/*` in `allowed_mime_types` or `size_limits.per_mime`: the matcher only
+    ///   handles `type/*`, so `*/*` silently matches nothing (an accidental deny-all).
+    ///   Callers wanting no restriction should omit the entry.
     fn validate_policy_body(
         scope: &PolicyScope,
         scope_owner_id: Option<Uuid>,
@@ -313,25 +258,11 @@ impl PolicyService {
         Ok(())
     }
 
-    // ── authorization helpers ────────────────────────────────────────────────
-
-    /// Shared "try `ADMIN_POLICY` first, else require owner == subject" gate
-    /// used by both [`Self::authorize_scope_owner`] (policy read/write) and
-    /// the `RetentionScope::User` arm of [`Self::authorize_retention_scope`].
-    ///
-    /// Tries `ADMIN_POLICY` first (cross-owner / tenant-wide administration);
-    /// on `Forbidden`, falls back to `fallback_action` (`READ`/`WRITE`) and
-    /// requires `required_owner_id` — when present — to match the caller's
-    /// own subject id.
-    ///
-    /// `required_owner_id == None` is ambiguous between the two callers:
-    /// - the policy endpoints use `None` for "tenant scope", which has no
-    ///   owner to compare, so the fallback should succeed on
-    ///   `fallback_action` alone;
-    /// - a `User`-scope retention rule always has a target user, so a missing
-    ///   target must be treated as a mismatch, not as "no check".
-    ///
-    /// `treat_missing_owner_as_authorized` picks between the two.
+    /// Try `ADMIN_POLICY` (cross-owner / tenant-wide); on `Forbidden`, fall back to
+    /// `fallback_action` (`READ`/`WRITE`) and require `required_owner_id`, when present, to
+    /// equal the caller's subject id. A missing owner is "tenant scope" for the policy
+    /// endpoints (authorized by the fallback alone) but a mismatch for `User`-scope retention
+    /// rules; `treat_missing_owner_as_authorized` picks between the two.
     async fn authorize_admin_or_owner(
         &self,
         ctx: &SecurityContext,
@@ -363,12 +294,8 @@ impl PolicyService {
         }
     }
 
-    /// Try `ADMIN_POLICY` first (cross-owner / tenant-wide administration); on
-    /// `Forbidden`, fall back to `fallback_action` (`READ`/`WRITE`) and require
-    /// `scope_owner_id` — when present — to match the caller's own subject id.
-    /// `scope_owner_id == None` means "tenant scope" for the policy endpoints,
-    /// which has no owner to compare, so the fallback succeeds on
-    /// `fallback_action` alone in that case.
+    /// Policy read/write gate: `ADMIN_POLICY`, else the fallback action on the caller's own
+    /// scope (`None` owner = tenant scope, authorized by the fallback alone).
     async fn authorize_scope_owner(
         &self,
         ctx: &SecurityContext,
@@ -379,18 +306,13 @@ impl PolicyService {
             .await
     }
 
-    /// Authorize a retention-rule mutation (create or delete) for the given
-    /// `(retention_scope, scope_target_id)` pair.
+    /// Authorize a retention-rule mutation for `(retention_scope, scope_target_id)`.
     ///
-    /// - `Tenant`: stays `WRITE`-gated — there is no owner to compare.
-    /// - `User`: requires `scope_target_id == Some(ctx.subject_id())` unless
-    ///   the caller holds `ADMIN_POLICY` (unlike [`Self::authorize_scope_owner`],
-    ///   a missing target is treated as a mismatch, not as "no check" — a
-    ///   `User`-scope retention rule always has a target user).
-    /// - `File`: resolves the target file via `require_file` (a missing/foreign
-    ///   file surfaces as `DomainError::FileNotFound`, closing verifier finding
-    ///   B4) and requires per-file `WRITE`, the same check `read_ops.rs`/
-    ///   `write.rs` use for ordinary file operations.
+    /// - `Tenant`: `WRITE`.
+    /// - `User`: target must be the caller unless they hold `ADMIN_POLICY`; a missing target
+    ///   is a mismatch.
+    /// - `File`: the target file must resolve (missing/foreign yields `FileNotFound`) and
+    ///   the caller needs per-file `WRITE`.
     async fn authorize_retention_scope(
         &self,
         ctx: &SecurityContext,

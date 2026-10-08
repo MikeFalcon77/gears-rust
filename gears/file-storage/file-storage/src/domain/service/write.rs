@@ -21,18 +21,13 @@ use crate::infra::content::mime::{
 use crate::infra::external_clients::UsageDelta;
 use crate::infra::signed_url::{Claims, Op, UploadConstraints};
 
-/// Verify the object the sidecar reported as uploaded, without reading it back
-/// (`cpt-cf-file-storage-fr-backend-abstraction`). The finalize callback is
-/// authenticated by the mandatory internal credential and the sidecar measured
-/// the size and SHA-256 while streaming the PUT, so those are trusted. This
-/// only checks the stored length via backend metadata and reads the bounded
-/// leading prefix needed for [`validate_and_resolve_mime`]'s magic-byte
-/// sniffing (see [`MIME_SNIFF_PREFIX_BYTES`]).
+/// Verify the object the sidecar reported as uploaded, without reading it back.
 ///
-/// A genuinely missing object (no prior successful PUT) surfaces as
-/// `DomainError::validation("content", ...)`; any other backend failure
-/// propagates unchanged so a transient 5xx is not misreported as "never
-/// uploaded".
+/// Finalize trust model: the callback is authenticated by the mandatory internal credential
+/// and the sidecar measured the size and SHA-256 while streaming the PUT, so those are
+/// trusted. This only checks the stored length via backend `size` and reads the bounded
+/// prefix (`MIME_SNIFF_PREFIX_BYTES`) needed to sniff the MIME type. A missing object is a
+/// `validation("content")` error; other backend failures propagate unchanged.
 ///
 /// Returns the MIME sniff prefix (empty for a zero-length object).
 async fn check_uploaded_object(
@@ -42,8 +37,7 @@ async fn check_uploaded_object(
 ) -> Result<Vec<u8>, DomainError> {
     let actual_size = match backend.size(backend_path).await {
         Ok(n) => i64::try_from(n).unwrap_or(i64::MAX),
-        // `exists` is the authoritative absent/failed signal; if it too
-        // fails, surface the real backend error.
+        // `exists` is the authoritative absent signal; if it fails too, surface `size`'s error.
         Err(size_err) => {
             return Err(match backend.exists(backend_path).await {
                 Ok(false) => DomainError::validation(
@@ -72,10 +66,9 @@ async fn check_uploaded_object(
 }
 
 impl FileService {
-    /// Authorize a write to `file_id` (WRITE action) without mutating anything.
-    /// The data plane calls this as a preflight **before** writing bytes to a
-    /// backend, so a rejected request never persists/overwrites blob content
-    /// (the post-write `finalize_upload` re-checks as defense-in-depth).
+    /// Authorize a write to `file_id` without mutating anything. The data plane calls this
+    /// **before** writing bytes, so a rejected request never overwrites blob content
+    /// (`finalize_upload` re-checks afterwards).
     pub async fn authorize_write(
         &self,
         ctx: &SecurityContext,
@@ -91,8 +84,8 @@ impl FileService {
         Ok(())
     }
 
-    /// Record an uploaded version's size+hash and mark it available. Called by
-    /// the sidecar after streaming bytes to the backend (write action).
+    /// Record an uploaded version's size and hash and mark it available (see
+    /// `check_uploaded_object` for what is verified).
     #[tracing::instrument(skip_all)]
     pub async fn finalize_upload(
         &self,
@@ -102,8 +95,6 @@ impl FileService {
         size: i64,
         hash_value: Vec<u8>,
     ) -> Result<(), DomainError> {
-        // Entry point: the actor's write request (finalize is one of the
-        // audited operations recorded by `cpt-cf-file-storage-flow-audit-trail-record-write`).
         if size < 0 {
             return Err(DomainError::validation("size", "must be non-negative"));
         }
@@ -115,9 +106,7 @@ impl FileService {
             .authorize(ctx, actions::WRITE, &file.gts_file_type, Some(file_id))
             .await?;
 
-        // Defense-in-depth size check: re-enforce the policy size ceiling at
-        // finalization time even though the sidecar already checked the
-        // upload constraint in the signed URL.
+        // Defense in depth: re-enforce the policy size ceiling (the signed URL already did).
         let version = self
             .store
             .get_version(file_id, version_id)
@@ -148,24 +137,13 @@ impl FileService {
             ));
         }
 
-        // The callback is authenticated by the mandatory internal credential
-        // and the sidecar measured the size and SHA-256 while streaming the
-        // PUT, so the reported hash is trusted. Finalize only checks the
-        // stored length via backend metadata (a missing object or a size
-        // mismatch is rejected here) and reads just the MIME-sniff prefix.
         let mime_sniff_prefix =
             check_uploaded_object(backend.as_ref(), &version.backend_path, size).await?;
         let actual_size = size;
         let actual_hash = hash_value;
 
-        // Declared MIME type is never trustworthy: validate the stored
-        // object's leading bytes against `version_mime` (reusing the
-        // same magic-byte sniffing the in-process data plane runs at
-        // ingress), rejecting a mismatch before anything is finalized. Only
-        // the leading `MIME_SNIFF_PREFIX_BYTES` are needed — see that
-        // constant's doc comment for why that is always sufficient. The
-        // returned type is the sniffed/canonical one when the bytes carry a
-        // recognizable signature, otherwise the declared type unchanged.
+        // The declared MIME is untrusted: the sniffed type wins when the bytes carry a
+        // recognizable signature, a mismatch is rejected.
         let validated_mime = validate_and_resolve_mime(&version_mime, &mime_sniff_prefix)?;
         enforce_size_ceiling_for_validated_mime(
             &policy,
@@ -182,9 +160,7 @@ impl FileService {
             serde_json::json!({ "version_id": version_id, "size": size }),
         );
 
-        // Persist the checked size and the sidecar-reported hash.
-        // `validated_mime` is persisted in place of the client's original
-        // declaration.
+        // `validated_mime` replaces the client's declaration.
         let ok = self
             .store
             .finalize_version(
@@ -192,8 +168,7 @@ impl FileService {
                 version_id,
                 actual_size,
                 actual_hash,
-                // Single-part upload → always whole-object SHA-256 (ADR-0006
-                // mode 1). No part count, no offset-manifest row.
+                // Single-part upload: whole-object SHA-256, no manifest.
                 crate::infra::content::hash_mode::HashMode::WholeSha256,
                 None,
                 None,
@@ -202,8 +177,7 @@ impl FileService {
             )
             .await?;
         if !ok {
-            // Distinguish "already finalized" (409, using the `version`
-            // snapshot read earlier in this call) from "row is gone" (404).
+            // Already finalized (409) vs row gone (404), from the earlier `version` snapshot.
             return Err(
                 if version.status == file_storage_sdk::VersionStatus::Available {
                     DomainError::conflict("version already finalized")
@@ -213,11 +187,7 @@ impl FileService {
             );
         }
 
-        // Credit the checked bytes now that the version is durably
-        // finalized. `create_file` already reported `+1 file` with `0 bytes`
-        // (bytes are unknown at creation time), so `file_count_delta` here is
-        // `0` -- this is the byte-crediting complement that makes the total
-        // symmetric with the debit at `delete_file_inner`/`delete_version`.
+        // `create_file` already counted the file (bytes unknown then); credit the bytes here.
         self.report_usage(UsageDelta {
             tenant_id: file.tenant_id,
             owner_id: file.owner_id,
@@ -229,14 +199,11 @@ impl FileService {
         Ok(())
     }
 
-    /// `POST /files/{id}/bind`: swap the content pointer to `version_id` under
-    /// optimistic CAS guarded by the `If-Match` content ETag. Returns the
-    /// updated file; `PreconditionFailed` on conflict (re-read the ETag and
-    /// rebind). The REST layer maps that canonical error to HTTP 400.
+    /// `POST /files/{id}/bind`: swap the content pointer to `version_id` under optimistic
+    /// CAS guarded by the `If-Match` content ETag; `PreconditionFailed` on conflict.
     ///
-    /// `if_match` is the opaque content ETag (or `*`, or `None` for the first
-    /// bind). The server recomputes the current ETag and compares — it never
-    /// reverses the ETag back to a `content_id`.
+    /// `if_match` is the opaque content ETag, `*`, or `None` for the first bind. The server
+    /// recomputes the current ETag and compares; it never decodes an ETag.
     #[tracing::instrument(skip_all)]
     pub async fn bind(
         &self,
@@ -252,7 +219,6 @@ impl FileService {
             .authorize(ctx, actions::WRITE, &file.gts_file_type, Some(file_id))
             .await?;
 
-        // The version must exist and be available.
         let version = self
             .store
             .get_version(file_id, version_id)
@@ -264,13 +230,11 @@ impl FileService {
             ));
         }
 
-        // Validate the If-Match precondition against the current content ETag.
         let expected_content_id = file.content_id;
         let current_etag = expected_content_id.map(|c| etag::content_etag(file_id, c));
         match if_match {
-            // The first bind (no content yet) may omit If-Match; rebinding
-            // already-bound content MUST carry it, otherwise the advertised
-            // conditional update degrades into an unconditional overwrite.
+            // Only the first bind may omit `If-Match`; a rebind without it would be an
+            // unconditional overwrite.
             None => {
                 if expected_content_id.is_some() {
                     return Err(DomainError::precondition_failed(
@@ -303,9 +267,7 @@ impl FileService {
             serde_json::json!({ "version_id": version_id }),
         ));
 
-        // Swap the content pointer (CAS) and flip `is_current` in a SINGLE
-        // transaction so `files.content_id` and `file_versions.is_current` can
-        // never diverge if a later write fails (DESIGN §3.7 bind invariant).
+        // One transaction, so `files.content_id` and `file_versions.is_current` never diverge.
         let now = OffsetDateTime::now_utc();
         let swapped = self
             .store
@@ -330,11 +292,7 @@ impl FileService {
         Ok(bound)
     }
 
-    /// Issue a signed download URL for a version (shared helper used by
-    /// `read_ops.rs`). Visibility is `pub(super)` so only sibling modules use it.
-    ///
-    /// `download_meta` is `Some((content_type, etag))` (P2 1.11) — threaded
-    /// straight through to `sign_url`'s `Op::Get`-only claims population.
+    /// Signed download URL for a version; `download_meta` is `(content_type, etag)`.
     pub(super) fn build_download_url(
         &self,
         file_id: Uuid,
@@ -356,8 +314,6 @@ impl FileService {
         )
     }
 
-    // ── metadata update ────────────────────────────────────────────────────────
-
     /// `PATCH /files/{id}`: JSON-merge-patch the custom metadata and bump
     /// `meta_version`, optionally guarded by `If-Match-Metadata`.
     pub async fn update_metadata(
@@ -374,13 +330,11 @@ impl FileService {
             .authorize(ctx, actions::WRITE, &file.gts_file_type, Some(file_id))
             .await?;
 
-        // Compute what the resulting metadata will look like after this patch,
-        // then validate against the effective policy.
+        // Validate the metadata as it will be after the patch.
         let policy = self
             .get_effective_policy_internal(ctx.subject_tenant_id(), file.owner_id)
             .await?;
         let existing = self.store.list_metadata(file_id).await?;
-        // Build a map from existing entries and apply the patch (merge semantics).
         let mut merged: HashMap<String, String> =
             existing.into_iter().map(|e| (e.key, e.value)).collect();
         for (key, value) in &patch.entries {
@@ -403,12 +357,8 @@ impl FileService {
             serde_json::json!({ "expected_meta_version": expected_meta_version }),
         );
 
-        // Apply the meta-version CAS and the patch in ONE transaction. The CAS
-        // runs first, so a stale `expected_meta_version` aborts before any row
-        // is touched and the rollback guarantees no partial metadata change is
-        // committed (the optimistic-concurrency guard cannot be bypassed). The
-        // per-key delete-then-insert upsert is also covered by the rollback, so
-        // a failed insert can never leave a key permanently removed.
+        // CAS and patch run in one transaction: a stale `expected_meta_version` aborts
+        // first, and a failed insert rolls back the per-key delete-then-insert upsert.
         let now = OffsetDateTime::now_utc();
         let bumped = self
             .store
@@ -422,30 +372,9 @@ impl FileService {
         self.store.require_file(&scope, file_id).await
     }
 
-    // ── ownership transfer (P2-M5) ────────────────────────────────────────────
-
-    /// `POST /files/{id}/transfer`: transfer ownership of a file to a new owner.
-    ///
-    /// The new owner's `owner_kind` and `owner_id` replace the current values.
-    /// An audit row (`TransferOwnership`) and a file event (`file.owner_transferred`)
-    /// are enqueued in the same transaction as the update.
-    ///
-    /// `new_owner_id` is rejected if it is the nil UUID. This gear has no
-    /// principal directory (no account-management SDK is wired into
-    /// `cf-gears-file-storage`), so it cannot verify that `new_owner_id` names
-    /// a real, same-tenant principal — only that it is not an obviously
-    /// malformed sentinel. Note that a *cross-tenant* transfer is already
-    /// structurally impossible through this endpoint: `tenant_id` on the
-    /// updated row always comes from the existing file (scoped to
-    /// `ctx.subject_tenant_id()` via [`Self::tenant_scope`]), never from the
-    /// request, so `new_owner_id` can only ever be recorded under the
-    /// caller's own tenant. Full existence/same-tenant-*membership*
-    /// validation of an arbitrary `new_owner_id` (i.e. "is this UUID actually
-    /// a principal in my tenant?") would require a cross-gear
-    /// account-management lookup and is a follow-up (🛑, also ties into
-    /// whether this action should require a distinct privileged-transfer
-    /// grant rather than reusing the file WRITE grant — see 0.7's
-    /// admin-scope decision).
+    /// `POST /files/{id}/transfer`: replace the file's owner kind and id, with audit and event
+    /// in the same transaction. `tenant_id` comes from the stored file, never the request.
+    /// The existence of `new_owner_id` is not verified (the gear has no principal directory).
     pub async fn transfer_ownership(
         &self,
         ctx: &SecurityContext,
@@ -514,7 +443,6 @@ impl FileService {
             return Err(DomainError::file_not_found(file_id));
         }
 
-        // Debit old owner, credit new owner. Bytes are unchanged.
         let total_bytes: i64 = self
             .store
             .list_versions(file_id)
@@ -539,23 +467,11 @@ impl FileService {
         self.store.require_file(&scope, file_id).await
     }
 
-    /// Record an uploaded version's size+hash and mark it available, authorized
-    /// by the sidecar's signed upload token rather than a user `SecurityContext`.
+    /// Like `finalize_upload`, but authorized by the sidecar's signed upload token (minted at
+    /// presign time) instead of a user `SecurityContext`.
     ///
-    /// This is the token-authenticated variant of [`finalize_upload`]. The
-    /// control plane minted the token at presign time, so verifying it here
-    /// constitutes full authorization — no separate user re-auth is needed
-    /// (DESIGN §bind-service "Trusts a sidecar-reported size/hash (the upload
-    /// URL was control-signed)").
-    ///
-    /// The `claims` have already been verified by the caller (signature + expiry
-    /// + `op == Put` + `file_id`/`version_id` match).
-    ///
-    /// This method performs the same defense-in-depth policy size check as the
-    /// user-facing path.
-    ///
-    /// The actor in the audit row is recorded as `"sidecar"` with the `Uuid::nil`
-    /// actor id, since no user identity is present in a sidecar callback.
+    /// The caller has already verified `claims` (signature, expiry, `op == Put`, ids). The
+    /// audit actor is `"sidecar"` with the nil UUID.
     #[tracing::instrument(skip_all)]
     pub async fn finalize_upload_by_token(
         &self,
@@ -570,16 +486,13 @@ impl FileService {
         let file_id = claims.file_id;
         let version_id = claims.version_id;
 
-        // Fetch file via allow_all scope: the data plane operates on a
-        // (file_id, version_id) pair already minted by the control plane.
+        // `allow_all`: the `(file_id, version_id)` pair was minted by the control plane.
         let file = self
             .store
             .require_file(&AccessScope::allow_all(), file_id)
             .await?;
 
-        // Defense-in-depth size check: re-enforce the policy size ceiling at
-        // finalization time even though the sidecar already checked the upload
-        // constraint in the signed URL.
+        // Defense in depth: re-enforce the policy size ceiling (the signed URL already did).
         let version = self
             .store
             .get_version(file_id, version_id)
@@ -610,24 +523,13 @@ impl FileService {
             ));
         }
 
-        // The callback is authenticated by the mandatory internal credential
-        // and the sidecar measured the size and SHA-256 while streaming the
-        // PUT, so the reported hash is trusted. Finalize only checks the
-        // stored length via backend metadata (a missing object or a size
-        // mismatch is rejected here) and reads just the MIME-sniff prefix.
         let mime_sniff_prefix =
             check_uploaded_object(backend.as_ref(), &version.backend_path, size).await?;
         let actual_size = size;
         let actual_hash = hash_value;
 
-        // Declared MIME type is never trustworthy: validate the stored
-        // object's leading bytes against `version_mime` (reusing the
-        // same magic-byte sniffing the in-process data plane runs at
-        // ingress), rejecting a mismatch before anything is finalized. Only
-        // the leading `MIME_SNIFF_PREFIX_BYTES` are needed — see that
-        // constant's doc comment for why that is always sufficient. The
-        // returned type is the sniffed/canonical one when the bytes carry a
-        // recognizable signature, otherwise the declared type unchanged.
+        // The declared MIME is untrusted: the sniffed type wins when the bytes carry a
+        // recognizable signature, a mismatch is rejected.
         let validated_mime = validate_and_resolve_mime(&version_mime, &mime_sniff_prefix)?;
         enforce_size_ceiling_for_validated_mime(
             &policy,
@@ -637,8 +539,6 @@ impl FileService {
             actual_size,
         )?;
 
-        // Actor is "sidecar" with nil UUID — no user identity is available in
-        // a token-authenticated callback.
         let audit = AuditEntry::success(
             file.tenant_id,
             "sidecar",
@@ -648,9 +548,7 @@ impl FileService {
             serde_json::json!({ "version_id": version_id, "size": size }),
         );
 
-        // Persist the checked size and the sidecar-reported hash.
-        // `validated_mime` is persisted in place of the client's original
-        // declaration.
+        // `validated_mime` replaces the client's declaration.
         let ok = self
             .store
             .finalize_version(
@@ -658,8 +556,7 @@ impl FileService {
                 version_id,
                 actual_size,
                 actual_hash,
-                // Single-part upload → always whole-object SHA-256 (ADR-0006
-                // mode 1). No part count, no offset-manifest row.
+                // Single-part upload: whole-object SHA-256, no manifest.
                 crate::infra::content::hash_mode::HashMode::WholeSha256,
                 None,
                 None,
@@ -668,8 +565,7 @@ impl FileService {
             )
             .await?;
         if !ok {
-            // Distinguish "already finalized" (409, using the `version`
-            // snapshot read earlier in this call) from "row is gone" (404).
+            // Already finalized (409) vs row gone (404), from the earlier `version` snapshot.
             return Err(
                 if version.status == file_storage_sdk::VersionStatus::Available {
                     DomainError::conflict("version already finalized")
@@ -679,8 +575,6 @@ impl FileService {
             );
         }
 
-        // Same byte-crediting complement as `finalize_upload` (see its
-        // comment) for the sidecar-callback / token-authenticated path.
         self.report_usage(UsageDelta {
             tenant_id: file.tenant_id,
             owner_id: file.owner_id,
@@ -693,8 +587,8 @@ impl FileService {
         Ok(())
     }
 
-    /// Delete a backend blob, logging (not failing) on error. A failed delete
-    /// degrades to an orphan reconciled by the P2 cleanup engine.
+    /// Delete a backend blob, logging (not failing) on error; a failure leaves an orphan
+    /// for the cleanup engine.
     pub(super) async fn best_effort_blob_delete(&self, backend_id: &str, path: &str) {
         let Ok(backend) = self.backends.get(backend_id) else {
             return;

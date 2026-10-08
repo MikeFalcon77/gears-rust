@@ -1,7 +1,5 @@
-//! In-memory storage backend — a real backend *type* for tests and ephemeral
-//! deployments. Content lives in a `Mutex<HashMap>` keyed by path.
-//!
-//! P2-M3: implements multipart upload natively (`multipart_native: true`).
+//! In-memory (non-durable) storage backend for tests and ephemeral deployments, with native
+//! multipart upload.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -29,7 +27,7 @@ type MultipartMap = HashMap<String, (String, BTreeMap<u32, Bytes>)>;
 pub struct InMemoryBackend {
     id: String,
     blobs: Mutex<HashMap<String, Bytes>>,
-    /// In-progress multipart state: handle → (path, parts in order)
+    /// In-progress multipart state: handle -> (path, parts in order).
     multipart: Mutex<MultipartMap>,
 }
 
@@ -66,10 +64,7 @@ impl StorageBackend for InMemoryBackend {
         BackendCapabilities {
             multipart_native: true,
             range_native: true,
-            // Intentionally left on the `BackendCapabilities::default()`
-            // value of `false`: content lives only in process memory and is
-            // lost on restart/crash, so `migrate_backend` must treat this as
-            // non-durable.
+            // `durable` stays `false`: content is lost on restart.
             ..BackendCapabilities::default()
         }
     }
@@ -79,11 +74,7 @@ impl StorageBackend for InMemoryBackend {
         Ok(())
     }
 
-    /// Collecting into a `Bytes` buffer is acceptable here: this backend is
-    /// explicitly non-durable, in-process storage for tests/dev deployments,
-    /// not a memory-DoS surface worth hardening. The override exists so the
-    /// shared backend contract tests (`local_fs_put_stream_*` and friends)
-    /// can run identically against every backend, not just `LocalFsBackend`.
+    /// Buffers the stream: acceptable for non-durable test/dev storage.
     async fn put_stream(
         &self,
         path: &str,
@@ -111,11 +102,7 @@ impl StorageBackend for InMemoryBackend {
             .ok_or_else(|| DomainError::backend(&self.id, format!("blob not found: {path}")))
     }
 
-    /// Yields the stored `Bytes` as a single chunk: this backend is
-    /// explicitly non-durable, in-process storage for tests/dev deployments,
-    /// not a memory-DoS surface worth hardening — the override exists so the
-    /// shared backend contract tests can run identically against every
-    /// backend, not just `LocalFsBackend`/`S3Backend`.
+    /// Yields the stored `Bytes` as a single chunk.
     async fn get_stream(
         &self,
         path: &str,
@@ -194,12 +181,8 @@ impl StorageBackend for InMemoryBackend {
                 )
             })?
         };
-        // Assemble parts in ascending part_number order (BTreeMap iterates
-        // sorted) into the blob store so `get` returns the whole object. The
-        // stored **hash** is no longer derived from these assembled bytes —
-        // per ADR-0006 mode 2 it is the offset-manifest root built from the
-        // per-part digests the caller already collected, so completing a
-        // multipart upload never rehashes the assembled object.
+        // Assemble in ascending part_number order (BTreeMap). The hash is the manifest root
+        // built from the caller's per-part digests, not rehashed from these bytes.
         let mut assembled = Vec::new();
         for (_, part_data) in parts_map {
             assembled.extend_from_slice(&part_data);
@@ -215,7 +198,6 @@ impl StorageBackend for InMemoryBackend {
         Ok(())
     }
 
-    /// Returns all blob paths currently in the store.
     async fn list_paths(&self) -> Result<Vec<String>, DomainError> {
         let paths = self.lock_blobs()?.keys().cloned().collect();
         Ok(paths)

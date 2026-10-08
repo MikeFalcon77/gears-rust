@@ -40,7 +40,6 @@ fn max_url_ttl_can_be_overridden() {
 
 #[test]
 fn rejects_unknown_fields() {
-    // deny_unknown_fields guards against silently-ignored config typos.
     let json = r#"{"max_url_ttl_secs": 60, "unexpected": true}"#;
     assert!(
         serde_json::from_str::<FileStorageConfig>(json).is_err(),
@@ -48,8 +47,7 @@ fn rejects_unknown_fields() {
     );
 }
 
-/// Config with the (mandatory) internal secret set, so a test can isolate
-/// the check it targets.
+/// Config with the mandatory internal secret set, so a test isolates the check it targets.
 fn cfg_with_secret() -> FileStorageConfig {
     FileStorageConfig {
         finalize_internal_secret: Some(SecretString::new("test-internal-secret")),
@@ -113,7 +111,6 @@ fn validate_allows_present_signing_key_seed_when_required_flag_set() {
         "a present signing_key_seed must pass validation even when required"
     );
 
-    // Redaction proof: the raw seed must not appear in Debug output.
     let cfg_debug = format!("{cfg:?}");
     assert!(
         !cfg_debug.contains(SEED),
@@ -162,7 +159,6 @@ fn present_finalize_internal_secret_passes_validate_and_is_redacted() {
     };
     assert!(cfg.validate().is_ok());
 
-    // Redaction proof: the raw secret must not appear in Debug output.
     let cfg_debug = format!("{cfg:?}");
     assert!(
         !cfg_debug.contains(SECRET),
@@ -183,9 +179,7 @@ fn serde_round_trip_preserves_value() {
 
 #[test]
 fn config_s3_backends_serde_round_trip() {
-    // P2 1.7.3 config wiring: `s3_backends` must serde round-trip faithfully,
-    // and `secret_access_key` must never leak through `FileStorageConfig`'s
-    // (or `S3BackendConfig`'s own) `Debug` output.
+    // `s3_backends` round-trips through serde; `secret_access_key` never leaks via `Debug`.
     const SECRET: &str = "super-secret-value-do-not-print-me";
 
     let original = FileStorageConfig {
@@ -220,8 +214,6 @@ fn config_s3_backends_serde_round_trip() {
     );
     assert!(entry.path_style);
 
-    // Redaction proof: the raw secret must not appear anywhere in either
-    // struct's `Debug` output.
     let cfg_debug = format!("{back:?}");
     assert!(
         !cfg_debug.contains(SECRET),
@@ -246,9 +238,7 @@ fn config_s3_backends_defaults_to_empty() {
 
 #[test]
 fn config_default_backend_id_defaults_to_none() {
-    // P2 1.7 Stage 6: an existing config without `default_backend_id` must
-    // keep parsing and keep `local-fs` as the implicit default (enforced by
-    // `gear.rs::build_backend_registry` falling back to `LOCAL_FS_ID`).
+    // A config without `default_backend_id` keeps `local-fs` as the implicit default.
     let cfg: FileStorageConfig = serde_json::from_str("{}").unwrap();
     assert_eq!(cfg.default_backend_id, None);
 }

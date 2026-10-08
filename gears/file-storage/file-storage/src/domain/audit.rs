@@ -1,12 +1,7 @@
-//! Transactional-outbox domain records for the file-storage gear.
-//!
-//! An [`AuditEntry`] is inserted into the `audit_outbox` table, and a
-//! [`FileEvent`] into the `events_outbox` table, in the **same DB transaction**
-//! as every write mutation, guaranteeing 100% coverage with no silent drops
-//! (the transactional-outbox pattern). Both are pure domain records: the
-//! control-plane services build them and hand them to the [`Store`] facade,
-//! which persists them — so neither the services nor the store depend on the
-//! persistence repo layer for these types.
+//! Transactional-outbox domain records: an [`AuditEntry`] (`audit_outbox`) and a
+//! [`FileEvent`] (`events_outbox`) are inserted in the **same DB transaction** as
+//! every write mutation, so no write goes unrecorded. Services build them and
+//! hand them to the [`Store`] facade, which persists them.
 //!
 //! [`Store`]: crate::infra::storage::Store
 
@@ -35,12 +30,11 @@ pub enum AuditOperation {
     MultipartAbort,
     /// `POST /files/{id}/versions/{vid}/finalize` — version bytes finalised.
     FinalizeVersion,
-    /// Background sweep deleted a version or file due to a retention policy.
+    /// The cleanup sweep deleted a version or file due to a retention policy.
     RetentionDelete,
     /// A file's content was moved from one backend to another.
     BackendMigrate,
-    /// A pending version or multipart session was cleaned up by the orphan
-    /// reconciliation sweep.
+    /// A pending version or multipart session was cleaned up by the orphan sweep.
     OrphanReconcile,
     /// Ownership of a file was transferred from one owner to another.
     TransferOwnership,
@@ -85,11 +79,8 @@ impl AuditOutcome {
     }
 }
 
-/// A file-event to be enqueued in the `events_outbox` table.
-///
-/// Built by the control-plane services (and the cleanup engine) and handed to
-/// the `Store`, which enqueues it in the same transaction as the mutation it
-/// describes — the file-event counterpart to [`AuditEntry`].
+/// A file event to be enqueued in `events_outbox` in the same transaction as the
+/// mutation it describes (the counterpart to [`AuditEntry`]).
 #[derive(Debug, Clone)]
 pub struct FileEvent {
     pub tenant_id: Uuid,
@@ -99,9 +90,7 @@ pub struct FileEvent {
     pub payload: serde_json::Value,
 }
 
-/// All data needed to emit one audit row.
-///
-/// Build with [`AuditEntry::new`]; the `Store` inserts it transactionally.
+/// All data needed to emit one audit row; build with `success` / `failure`.
 #[allow(unknown_lints, de0309_must_have_domain_model)]
 #[derive(Debug, Clone)]
 pub struct AuditEntry {
@@ -117,7 +106,7 @@ pub struct AuditEntry {
 }
 
 impl AuditEntry {
-    /// Create an audit entry for a successful write.
+    /// Audit entry for a successful write.
     pub fn success(
         tenant_id: Uuid,
         actor_kind: impl Into<String>,
@@ -138,7 +127,7 @@ impl AuditEntry {
         }
     }
 
-    /// Create an audit entry for a failed write attempt.
+    /// Audit entry for a failed write attempt.
     pub fn failure(
         tenant_id: Uuid,
         actor_kind: impl Into<String>,

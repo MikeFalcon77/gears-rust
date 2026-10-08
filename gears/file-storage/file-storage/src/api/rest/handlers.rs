@@ -67,16 +67,11 @@ fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Interim gear-local shared-secret credential for the s2s finalize/
-/// report-part callback routes (P2 0.1 remaining — see
-/// `docs/ADR/0003-…-sidecar-data-plane.md`'s trust-model section). This is a
-/// stop-gap until the platform's `toolkit-security::internal_auth` profiles
-/// are deployable in this gear; swap the comparator below for
-/// `InternalAuthenticator` when that lands.
+/// Shared-secret credential for the s2s finalize/report-part callbacks (ADR-0003);
+/// interim until `toolkit-security::internal_auth` can replace it.
 ///
-/// The secret (`FileStorageConfig::finalize_internal_secret`) is mandatory:
-/// [`FinalizeAuth::verify`] always requires a matching `x-fs-internal-token`
-/// header in addition to the signed upload token the caller already verified.
+/// The secret (`FileStorageConfig::finalize_internal_secret`) is mandatory: `verify`
+/// always requires a matching `x-fs-internal-token` on top of the signed upload token.
 pub struct FinalizeAuth {
     secret: String,
 }
@@ -87,22 +82,15 @@ impl FinalizeAuth {
         Self { secret }
     }
 
-    /// Verify the `x-fs-internal-token` header against the configured
-    /// secret. Comparison is constant-time to avoid leaking the secret
-    /// through response-timing side channels.
+    /// Verify the `x-fs-internal-token` header; the comparison is constant-time.
     pub fn verify(&self, headers: &HeaderMap) -> Result<(), DomainError> {
         let expected = self.secret.as_str();
         let provided = headers
             .get("x-fs-internal-token")
             .and_then(|v| v.to_str().ok());
         let matches = provided.is_some_and(|provided| {
-            // `ring::constant_time::verify_slices_are_equal` is ring 0.17's
-            // constant-time byte-slice comparator (this crate already
-            // depends on `ring` via `infra::signed_url`). It lives under a
-            // `#[deprecated]` re-export with no non-deprecated replacement
-            // for a bare secret comparison, so the deprecation warning is
-            // suppressed locally rather than adding a new crate (e.g.
-            // `subtle`) for this one call.
+            // Constant-time comparator; only available via a deprecated re-export in
+            // ring 0.17, suppressed here rather than adding a crate for one call.
             #[allow(deprecated)]
             ring::constant_time::verify_slices_are_equal(expected.as_bytes(), provided.as_bytes())
                 .is_ok()
@@ -116,8 +104,6 @@ impl FinalizeAuth {
         }
     }
 }
-
-// ── create + presign ─────────────────────────────────────────────────────────
 
 pub async fn create_file(
     uri: Uri,
@@ -180,13 +166,10 @@ pub async fn bind(
     let if_match = header_str(&headers, "if-match");
     svc.bind(&ctx, file_id, req.version_id, if_match.as_deref())
         .await?;
-    // Re-read with metadata so the mutation response round-trips the full file
-    // state instead of reporting empty custom metadata.
+    // Re-read so the response carries the full custom metadata.
     let (file, meta) = svc.get_file_with_metadata(&ctx, file_id).await?;
     Ok(Json(FileDto::from_parts(file, meta)))
 }
-
-// ── reads ─────────────────────────────────────────────────────────────────────
 
 pub async fn get_file(
     Extension(ctx): Ctx,
@@ -269,8 +252,6 @@ pub async fn download_url(
     }))
 }
 
-// ── mutations ──────────────────────────────────────────────────────────────────
-
 pub async fn update_metadata(
     Extension(ctx): Ctx,
     Extension(svc): Svc,
@@ -289,7 +270,6 @@ pub async fn update_metadata(
     };
     svc.update_metadata(&ctx, file_id, patch, expected_meta_version)
         .await?;
-    // Re-read with metadata so the response reflects the patched state.
     let (file, meta) = svc.get_file_with_metadata(&ctx, file_id).await?;
     Ok(Json(FileDto::from_parts(file, meta)))
 }
@@ -314,8 +294,6 @@ pub async fn delete_version(
     Ok(no_content().into_response())
 }
 
-// ── storages ────────────────────────────────────────────────────────────────────
-
 pub async fn list_storages(Extension(svc): Svc) -> ApiResult<JsonBody<StorageDtoList>> {
     let items = svc
         .list_backends()
@@ -332,8 +310,6 @@ pub async fn get_storage(
     let (id, caps) = svc.get_backend(&storage_id)?;
     Ok(Json(StorageDto::new(id, caps)))
 }
-
-// ── policy (P2-M1) ──────────────────────────────────────────────────────────────
 
 /// Query params for `GET /policy` (own policy for a given scope).
 #[derive(Debug, Deserialize)]
@@ -393,8 +369,6 @@ pub async fn get_effective_policy(
     Ok(Json(EffectivePolicyDto::from(ep)))
 }
 
-// ── retention rules (P2-M1) ────────────────────────────────────────────────────
-
 /// `GET /retention-rules` — list all retention rules for the caller's tenant.
 pub async fn list_retention_rules(
     Extension(ctx): Ctx,
@@ -437,8 +411,6 @@ pub async fn delete_retention_rule(
     }
 }
 
-// ── multipart upload (multipart-coordinator feature) ──────────────────────────
-
 fn plan_to_dto(p: MultipartPlan) -> MultipartPlanDto {
     MultipartPlanDto {
         upload_id: p.upload_id,
@@ -459,8 +431,8 @@ fn plan_to_dto(p: MultipartPlan) -> MultipartPlanDto {
     }
 }
 
-/// `POST /files/{id}/multipart` — initiate a server-authoritative multipart
-/// upload session and return the parts plan with per-part signed sidecar URLs.
+/// `POST /files/{id}/multipart` — initiate a multipart upload; returns the parts plan
+/// with per-part signed sidecar URLs.
 pub async fn initiate_multipart(
     Extension(ctx): Ctx,
     Extension(svc): MultiSvc,
@@ -482,10 +454,9 @@ pub async fn initiate_multipart(
 
 /// `POST /files/{id}/multipart/{upload_id}/complete` — finalize all parts.
 ///
-/// Returns the bound version's id, size, and ADR-0006 composite hash (item
-/// 3.3) instead of the previous bare `204`. `If-Match` is optional: a
-/// concrete value is checked against the file's current content `ETag`; `*`
-/// (or omission) is unconditional.
+/// Returns the bound version's id, size, and ADR-0006 composite hash. `If-Match` is
+/// optional: a concrete value is checked against the current content `ETag`; `*` or
+/// omission is unconditional.
 pub async fn complete_multipart(
     Extension(ctx): Ctx,
     Extension(svc): MultiSvc,
@@ -539,9 +510,8 @@ fn status_to_dto(s: MultipartUploadStatus) -> MultipartStatusDto {
     }
 }
 
-/// `GET /files/{id}/multipart/{upload_id}` — introspect a multipart upload
-/// (item 3.4): current state, received parts, and (while resumable) fresh
-/// resume URLs for the missing parts.
+/// `GET /files/{id}/multipart/{upload_id}` — state, received parts, and (while
+/// resumable) fresh URLs for the missing parts.
 pub async fn introspect_multipart(
     Extension(ctx): Ctx,
     Extension(svc): MultiSvc,
@@ -563,11 +533,9 @@ pub async fn abort_multipart(
     Ok(no_content().into_response())
 }
 
-// ── backend migration (P2-M4) ─────────────────────────────────────────────────
-
 /// `POST /files/{id}/migrate` — migrate a file's content to a different backend.
 ///
-/// Non-versioned files only. Preserves identity and verifies content hash.
+/// Non-versioned files only.
 pub async fn migrate_backend(
     Extension(ctx): Ctx,
     Extension(svc): Svc,
@@ -579,8 +547,6 @@ pub async fn migrate_backend(
     Ok(no_content().into_response())
 }
 
-// ── ownership transfer (P2-M5) ────────────────────────────────────────────────
-
 /// `POST /files/{id}/transfer` — transfer ownership of a file to a new owner.
 pub async fn transfer_ownership(
     Extension(ctx): Ctx,
@@ -590,10 +556,8 @@ pub async fn transfer_ownership(
 ) -> ApiResult<JsonBody<FileDto>> {
     let new_owner_kind = file_storage_sdk::OwnerKind::parse(&req.new_owner_kind)
         .ok_or_else(|| DomainError::validation("new_owner_kind", "must be 'user' or 'app'"))?;
-    // Capture metadata BEFORE the transfer. A transfer does not change custom
-    // metadata, but afterwards the caller may no longer have read access under
-    // the new owner — re-reading then and defaulting on failure would return a
-    // 200 with empty `custom_metadata` for a file that actually has some.
+    // Read metadata before the transfer: afterwards the caller may lose read access
+    // under the new owner, and a failed re-read must not yield empty metadata.
     let (_, meta) = svc.get_file_with_metadata(&ctx, file_id).await?;
     let file = svc
         .transfer_ownership(&ctx, file_id, new_owner_kind, req.new_owner_id)
@@ -601,10 +565,7 @@ pub async fn transfer_ownership(
     Ok(Json(FileDto::from_parts(file, meta)))
 }
 
-// ── data-plane finalize (s2s, token-authenticated) ────────────────────────────
-
 /// Request body for the data-plane finalize endpoint.
-///
 /// The sidecar posts the measured size and SHA-256 hash after a successful PUT.
 #[derive(Debug, serde::Deserialize)]
 pub struct FinalizeUploadReq {
@@ -616,12 +577,8 @@ pub struct FinalizeUploadReq {
 
 /// `POST /files/{file_id}/versions/{version_id}/finalize`
 ///
-/// Token-authenticated: the request must carry the signed upload token in the
-/// `x-fs-token` request header. No user JWT is required — the token proves the
-/// upload was pre-authorized by the control plane.
-///
-/// Called by the sidecar immediately after a successful `PUT` to report the
-/// measured size + hash and transition the version from `pending` to `available`.
+/// Authenticated by the signed upload token in `x-fs-token` (no user JWT). Called by the
+/// sidecar after a successful `PUT` to report size + hash and make the version `available`.
 pub async fn finalize_version(
     Extension(svc): Svc,
     Extension(verifier): Extension<Arc<Verifier>>,
@@ -630,7 +587,6 @@ pub async fn finalize_version(
     headers: HeaderMap,
     Json(req): Json<FinalizeUploadReq>,
 ) -> ApiResult<impl IntoResponse> {
-    // Extract the token from the x-fs-token header.
     let token = headers
         .get("x-fs-token")
         .and_then(|v| v.to_str().ok())
@@ -649,16 +605,10 @@ pub async fn finalize_version(
         .into());
     }
 
-    // P2 0.1 remaining: interim gear-local shared-secret credential gate —
-    // AFTER token verification, additionally require a matching
-    // `x-fs-internal-token` header. The reported size and hash are trusted
-    // on the strength of this credential.
+    // The reported size and hash are trusted on the strength of this credential.
     finalize_auth.verify(&headers)?;
 
-    // P2 1.8 remediation: log the sidecar-propagated `x-request-id` (echoed
-    // from `claims.request_id`, minted at signed-URL issuance) so this
-    // control-plane log line can be joined with the sidecar's own log lines
-    // for the same upload.
+    // Log the sidecar-propagated `x-request-id` to join with the sidecar's own logs.
     let request_id = headers
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
@@ -688,8 +638,7 @@ pub async fn finalize_version(
 
 /// Request body for the data-plane report-part endpoint.
 ///
-/// The sidecar posts this after successfully writing a part's bytes to the
-/// backend (P2 0.2 group B — the "report part" callback).
+/// The sidecar posts this after writing a part's bytes to the backend.
 #[derive(Debug, serde::Deserialize)]
 pub struct ReportPartReq {
     /// Backend-assigned `ETag` for this part (opaque, backend-specific).
@@ -702,10 +651,8 @@ pub struct ReportPartReq {
 
 /// `POST /files/{file_id}/versions/{version_id}/multipart/{upload_id}/parts/{part_number}/report`
 ///
-/// Token-authenticated (mirrors `finalize_version`): the request must carry
-/// the signed `multipart_part` upload token in the `x-fs-token` request
-/// header. Called by the sidecar immediately after a successful part write to
-/// record the part row that `complete_multipart_upload` assembles from.
+/// Authenticated like `finalize_version`, with a signed `multipart_part` token. Records
+/// the part row that `complete_multipart_upload` assembles from.
 pub async fn report_multipart_part(
     Extension(msvc): MultiSvc,
     Extension(verifier): Extension<Arc<Verifier>>,
@@ -714,7 +661,6 @@ pub async fn report_multipart_part(
     headers: HeaderMap,
     Json(req): Json<ReportPartReq>,
 ) -> ApiResult<impl IntoResponse> {
-    // Extract the token from the x-fs-token header.
     let token = headers
         .get("x-fs-token")
         .and_then(|v| v.to_str().ok())
@@ -725,8 +671,7 @@ pub async fn report_multipart_part(
         .verify(&token, OffsetDateTime::now_utc())
         .map_err(|e| DomainError::token_invalid(e.to_string()))?;
 
-    // The token must authorize a report for exactly this
-    // (file_id, version_id, upload_id, part_number).
+    // The token must authorize exactly this (file, version, upload, part).
     if claims.op != Op::MultipartPart
         || claims.file_id != file_id
         || claims.version_id != version_id
@@ -738,10 +683,9 @@ pub async fn report_multipart_part(
         );
     }
 
-    // P2 0.1 remaining: same interim shared-secret gate as `finalize_version`.
+    // Same shared-secret gate as `finalize_version`.
     finalize_auth.verify(&headers)?;
 
-    // P2 1.8 remediation: same correlation-id logging as `finalize_version`.
     let request_id = headers
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())

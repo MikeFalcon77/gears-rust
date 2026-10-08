@@ -93,11 +93,8 @@ impl FileRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// Optimistic compare-and-swap of the content pointer (the bind operation).
-    ///
-    /// Sets `content_id := new_content` only if the current `content_id` equals
-    /// `expected` (or both are NULL for the first bind). Returns `true` on a
-    /// successful swap, `false` on an `If-Match` conflict.
+    /// Compare-and-swap of the content pointer: sets `content_id` only if it equals
+    /// `expected` (NULL for the first bind). Returns `false` on an `If-Match` conflict.
     pub async fn bind_content_cas<C: DBRunner>(
         &self,
         conn: &C,
@@ -125,9 +122,8 @@ impl FileRepo {
         Ok(res.rows_affected > 0)
     }
 
-    /// Bump `meta_version` and `last_modified_at` for a metadata-only write,
-    /// optionally guarded by an `If-Match-Metadata` prepredicateition on the current
-    /// `meta_version`. Returns `false` if the prepredicateition did not match.
+    /// Bump `meta_version` and `last_modified_at`, optionally guarded by an
+    /// `If-Match-Metadata` check on the current `meta_version`; `false` if it failed.
     pub async fn touch_meta<C: DBRunner>(
         &self,
         conn: &C,
@@ -171,13 +167,9 @@ impl FileRepo {
         Ok(res.rows_affected > 0)
     }
 
-    /// List files across all tenants for the retention sweep engine,
-    /// **keyset-paginated by `file_id`** to bound sweep memory on large
-    /// deployments. Returns up to `limit` files ordered by `file_id`, starting
-    /// strictly after `after` (`None` = from the beginning); the caller loops,
-    /// advancing `after` to the last returned `file_id`, until it gets a short
-    /// page. Keyset (not offset) paging is used so that deleting expired files
-    /// mid-sweep does not shift the window and skip rows.
+    /// List files across all tenants for the sweep, keyset-paginated by `file_id`:
+    /// up to `limit` files strictly after `after`. Keyset (not offset) paging so
+    /// deleting files mid-sweep does not shift the window and skip rows.
     pub async fn list_all_for_sweep<C: DBRunner>(
         &self,
         conn: &C,
@@ -200,8 +192,7 @@ impl FileRepo {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
-    /// Update `owner_kind` and `owner_id` for a file row, and bump
-    /// `last_modified_at`. Returns `true` if a row was found and updated.
+    /// Update `owner_kind`/`owner_id` and bump `last_modified_at`; `true` if a row matched.
     pub async fn update_owner<C: DBRunner>(
         &self,
         conn: &C,

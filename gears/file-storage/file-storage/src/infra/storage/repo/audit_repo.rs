@@ -1,12 +1,10 @@
 //! Repository for the `audit_outbox` table.
 //!
-//! All writes use `allow_all()` scope — the outbox has no `tenant_id` secure
-//! column; the tenant identifier is instead stored as a plain data column and
-//! enforced at the application level (the `Store` always writes the caller's
-//! tenant).
+//! All writes use `allow_all()` scope: the outbox has no secure tenant column;
+//! `tenant_id` is a plain data column and the `Store` always writes the caller's.
 //!
-//! The `insert` method is designed to be called **inside an open transaction**
-//! so the audit row is committed atomically with the mutation it describes.
+//! `insert` must be called **inside an open transaction** so the audit row commits
+//! atomically with the mutation it describes.
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use toolkit_db::secure::{DBRunner, SecureEntityExt, secure_insert};
@@ -27,10 +25,7 @@ impl AuditRepo {
         Self
     }
 
-    /// Insert one audit row into `conn` (which may be a transaction reference).
-    ///
-    /// Callers MUST pass a transaction runner so the row is committed with the
-    /// surrounding mutation (the atomicity invariant).
+    /// Insert one audit row; `conn` MUST be the surrounding transaction.
     pub async fn insert<C: DBRunner>(
         &self,
         conn: &C,
@@ -48,15 +43,13 @@ impl AuditRepo {
             occurred_at: Set(entry.occurred_at),
             published_at: Set(None),
         };
-        // No tenant scope on this table — allow_all() is intentional.
         secure_insert::<Entity>(am, &AccessScope::allow_all(), conn)
             .await
             .map_err(DomainError::from)?;
         Ok(())
     }
 
-    /// List unpublished audit rows for a specific file — useful in tests to
-    /// verify that exactly the right rows were written.
+    /// List unpublished audit rows for a file (used in tests).
     pub async fn list_for_file<C: DBRunner>(
         &self,
         conn: &C,

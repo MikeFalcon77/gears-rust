@@ -1,15 +1,7 @@
-//! Lifecycle / cleanup / sweep intent methods and idempotency key queries.
+//! Lifecycle / cleanup / sweep queries and idempotency-key lookup.
 //!
-//! Covers: abandoned pending versions, expired multipart sessions, audit
-//! outbox query, retention-rule sweep helpers, sweep file-list pagination,
-//! and idempotency-key lookup.
-//!
-//! Superseded (non-current) version reclamation is **not** part of the P2
-//! sweep -- see the "Superseded version retention" note in `DESIGN.md`
-//! (§3.7, `file_versions` table) for the deferral rationale. It is deferred
-//! to P3 pending a versioning-policy schema (e.g. `keep_last_n` /
-//! `max_non_current_age_days`); no such field exists on `RetentionRuleBody`
-//! today (`crate::domain::policy`).
+//! Reclamation of superseded (non-current) versions is not implemented: it needs a
+//! versioning-policy field that `RetentionRuleBody` does not have.
 
 use time::OffsetDateTime;
 use toolkit_security::AccessScope;
@@ -25,8 +17,6 @@ use crate::infra::storage::repo::AuditRow;
 use crate::infra::storage::store::Store;
 
 impl Store {
-    // ── idempotency keys (P2-M3) ──────────────────────────────────────────────
-
     /// Fetch an idempotency record if it exists and has not expired.
     pub async fn get_idempotency_key(
         &self,
@@ -43,23 +33,14 @@ impl Store {
             .await
     }
 
-    // ── audit outbox (P2-M4) ──────────────────────────────────────────────────
-
-    /// List audit rows for a specific file, ordered by occurrence time.
-    ///
-    /// Intended for testing; not exposed on the REST API.
+    /// List audit rows for a file, ordered by occurrence time (tests only).
     pub async fn list_audit(&self, file_id: Uuid) -> Result<Vec<AuditRow>, DomainError> {
         let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos.audit.list_for_file(&conn, file_id).await
     }
 
-    // ── cleanup engine (P2-M4 lifecycle) ─────────────────────────────────────
-
-    /// List all `pending` version rows older than `older_than` (system scope),
-    /// excluding versions still backing a live `in_progress` multipart session
-    /// (`expires_at > now`) -- see
-    /// [`VersionRepo::list_pending_older_than`][crate::infra::storage::repo::VersionRepo::list_pending_older_than]
-    /// for the invariant this protects.
+    /// List `pending` versions older than `older_than`, excluding versions backing a
+    /// live `in_progress` session (see `VersionRepo::list_pending_older_than`).
     pub async fn list_abandoned_pending_versions(
         &self,
         older_than: OffsetDateTime,
@@ -72,7 +53,7 @@ impl Store {
             .await
     }
 
-    /// List all `in_progress` multipart sessions whose `expires_at` is before `now`.
+    /// List `in_progress` multipart sessions whose `expires_at` is before `now`.
     pub async fn list_expired_multipart_uploads(
         &self,
         now: OffsetDateTime,
@@ -81,9 +62,8 @@ impl Store {
         self.repos.multipart.list_expired(&conn, now).await
     }
 
-    /// List files across all tenants for the retention sweep, keyset-paginated
-    /// by `file_id` (see [`FileRepo::list_all_for_sweep`]). `after = None` starts
-    /// from the beginning; the caller loops until it gets fewer than `limit`.
+    /// List files across all tenants for the sweep, keyset-paginated by `file_id`;
+    /// the caller loops with `after` until it gets fewer than `limit`.
     pub async fn list_all_files_for_sweep(
         &self,
         after: Option<Uuid>,
@@ -96,8 +76,7 @@ impl Store {
             .await
     }
 
-    /// List retention rules for a specific file (`scope = 'file'`), across all
-    /// tenants. Used by the retention sweep engine.
+    /// List retention rules for a file (`scope = 'file'`), across all tenants.
     pub async fn list_file_retention_rules(
         &self,
         file_id: Uuid,
@@ -109,8 +88,7 @@ impl Store {
             .await
     }
 
-    /// List all retention rules across all tenants and scopes — for the sweep
-    /// engine.
+    /// List all retention rules across all tenants and scopes.
     pub async fn list_all_retention_rules(&self) -> Result<Vec<StoredRetentionRule>, DomainError> {
         let conn = self.db.conn().map_err(DomainError::from)?;
         self.repos
@@ -119,8 +97,7 @@ impl Store {
             .await
     }
 
-    /// Bulk-delete all `idempotency_keys` rows whose `expires_at` is at or
-    /// before `now` (P2 remediation 1.9). Returns the number of rows removed.
+    /// Bulk-delete `idempotency_keys` rows expired at or before `now`; returns the count.
     pub async fn delete_expired_idempotency_keys(
         &self,
         now: OffsetDateTime,

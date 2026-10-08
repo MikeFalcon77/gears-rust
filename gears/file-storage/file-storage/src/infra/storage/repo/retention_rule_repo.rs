@@ -82,8 +82,7 @@ impl RetentionRuleRepo {
         Ok(rule_id)
     }
 
-    /// List retention rules for a specific file (`scope = 'file'`), across all
-    /// tenants — for the retention sweep engine.
+    /// List retention rules for a file (`scope = 'file'`), across all tenants.
     pub async fn list_by_file_scope<C: DBRunner>(
         &self,
         conn: &C,
@@ -105,8 +104,7 @@ impl RetentionRuleRepo {
         rows.into_iter().map(map_model).collect()
     }
 
-    /// List every retention rule across all tenants and scopes — for the
-    /// retention sweep engine.
+    /// List every retention rule across all tenants and scopes.
     pub async fn list_all<C: DBRunner>(
         &self,
         conn: &C,

@@ -1,11 +1,7 @@
 //! Infrastructure → domain error conversions.
 //!
-//! Kept out of `error.rs` on purpose: `DomainError` is imported by nearly every
-//! module in the gear (very high fan-in), so letting it also depend on
-//! `toolkit_db` would make it a high-coupling crossroads (Henry–Kafura). The
-//! `?`-driven `From` impls live here instead, so the widely-used error *type*
-//! stays dependency-light while the infra coupling is confined to this small,
-//! rarely-imported module.
+//! Kept out of `error.rs` so the widely-imported `DomainError` type stays free of
+//! `toolkit_db` dependencies.
 
 use sea_orm::DbErr;
 use toolkit_db::DbError;

@@ -1,19 +1,5 @@
-//! P2 initial migration — all P2 schema in one step.
-//!
-//! Combines every P2 milestone's DDL into a single migration so P2 ships as
-//! one atomic schema bump on top of the P1 baseline. Tables (in FK order):
-//!   - `policies`: per-tenant / per-user policy body (allowed types, size
-//!     limits, metadata limits, enabled event types). Body is JSONB/text.
-//!   - `retention_rules`: per-tenant / per-user / per-file retention criteria.
-//!   - `multipart_uploads`: in-flight multipart upload sessions.
-//!   - `multipart_upload_parts`: individual parts within a session.
-//!   - `idempotency_keys`: deduplication keys for POST /files.
-//!   - `audit_outbox`: transactional-outbox rows for the audit trail.
-//!   - `events_outbox`: transactional-outbox rows for file events.
-//!
-//! P2 schema of the file-storage gear; table
-//! names are flat (unqualified) -- consistent with P1 and the `SeaORM` entity
-//! `table_name` attributes.
+//! Policies, retention rules, multipart uploads (+ parts), idempotency keys, and
+//! the audit/events transactional outboxes, in FK order. Table names are flat.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

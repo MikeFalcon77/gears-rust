@@ -84,9 +84,8 @@ pub struct CreateFileReq {
     pub mime_type: String,
     #[serde(default)]
     pub custom_metadata: Vec<MetadataEntryDto>,
-    /// Optional idempotency key for deduplication of retried requests.
-    /// Within the same `(owner_kind, owner_id)`, a retry with the same key
-    /// returns the original response without creating a new file.
+    /// Optional idempotency key: within the same `(owner_kind, owner_id)`, a retry with
+    /// the same key returns the original response without creating a new file.
     #[serde(default)]
     pub idempotency_key: Option<String>,
 }
@@ -134,9 +133,6 @@ pub struct UpdateMetadataReq {
 }
 
 /// One content version (`GET /files/{id}/versions`).
-///
-/// Wire shape documented in `docs/api.md` (`hash_mode`/`part_count`/`manifest`
-/// fields, ADR-0006).
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(response)]
 pub struct VersionDto {
@@ -145,12 +141,10 @@ pub struct VersionDto {
     pub size: i64,
     pub hash_algorithm: String,
     pub hash: String,
-    /// ADR-0006 content-hash mode: `"whole-sha256"` (`hash` is
-    /// `sha256(object bytes)`) or `"multipart-composite-sha256"` (`hash` is
-    /// `sha256(manifest)`, the offset-manifest composite root).
+    /// Hash mode: `"whole-sha256"` (`hash` is `sha256` of the object bytes) or
+    /// `"multipart-composite-sha256"` (`hash` is `sha256` of the part manifest).
     pub hash_mode: String,
-    /// Number of parts for a `multipart-composite-sha256` version; omitted
-    /// (`null`) for `whole-sha256`.
+    /// Number of parts for `multipart-composite-sha256`; omitted for `whole-sha256`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub part_count: Option<i32>,
     pub status: String,
@@ -177,9 +171,8 @@ impl From<FileVersion> for VersionDto {
 }
 
 /// List of file versions (`GET /files/{id}/versions`).
-// Transparent newtype: serializes as a bare JSON array (wire format unchanged)
-// while registering a unique OpenAPI schema name, so file-storage list responses
-// do not collide with other gears in the shared `Vec` schema-name slot.
+// Transparent newtype: a bare JSON array with a unique OpenAPI schema name (applies to
+// every `*List` below).
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct VersionDtoList(pub Vec<VersionDto>);
@@ -187,9 +180,6 @@ pub struct VersionDtoList(pub Vec<VersionDto>);
 impl toolkit::api::api_dto::ResponseApiDto for VersionDtoList {}
 
 /// List of files (`GET /files`).
-// Transparent newtype: serializes as a bare JSON array (wire format unchanged)
-// while registering a unique OpenAPI schema name, so file-storage list responses
-// do not collide with other gears in the shared `Vec` schema-name slot.
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct FileDtoList(pub Vec<FileDto>);
@@ -235,16 +225,11 @@ impl StorageDto {
 }
 
 /// List of configured storage backends (`GET /storages`).
-// Transparent newtype: serializes as a bare JSON array (wire format unchanged)
-// while registering a unique OpenAPI schema name, so file-storage list responses
-// do not collide with other gears in the shared `Vec` schema-name slot.
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct StorageDtoList(pub Vec<StorageDto>);
 
 impl toolkit::api::api_dto::ResponseApiDto for StorageDtoList {}
-
-// ── Policy DTOs (P2-M1) ────────────────────────────────────────────────────────
 
 /// Per-mime-type size limit override in a policy request/response.
 #[derive(Debug, Clone)]
@@ -456,8 +441,6 @@ pub struct SetPolicyReq {
     pub body: PolicyBodyDto,
 }
 
-// ── Retention rule DTOs (P2-M1) ────────────────────────────────────────────────
-
 /// Age-based retention criterion.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(request, response)]
@@ -591,9 +574,6 @@ impl From<StoredRetentionRule> for RetentionRuleDto {
 }
 
 /// List of retention rules (`GET /retention-rules`).
-// Transparent newtype: serializes as a bare JSON array (wire format unchanged)
-// while registering a unique OpenAPI schema name, so file-storage list responses
-// do not collide with other gears in the shared `Vec` schema-name slot.
 #[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
 #[serde(transparent)]
 pub struct RetentionRuleDtoList(pub Vec<RetentionRuleDto>);
@@ -612,35 +592,28 @@ pub struct CreateRetentionRuleReq {
     pub body: RetentionRuleBodyDto,
 }
 
-// ── Multipart upload DTOs (multipart-coordinator feature) ─────────────────────
-
 /// Request to initiate a multipart upload (`POST /files/{id}/multipart`).
 ///
-/// The server returns a server-authoritative parts plan with one signed sidecar
-/// URL per part (FEATURE §3, §4; DESIGN §4.6).
+/// The server answers with a parts plan containing one signed upload URL per part.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(request)]
 pub struct InitiateMultipartReq {
     /// Declared MIME type for the file content.
     pub declared_mime: String,
-    /// Declared total file size in bytes.
-    ///
-    /// **Required** (per DESIGN §4.6 "server-authoritative" model). The control
-    /// plane validates this value against the effective policy size limit and the
-    /// storage quota at initiate time — exactly as single-part upload does — so
-    /// that an oversized upload is rejected before any bytes are transferred.
+    /// Declared total file size in bytes. Validated against the effective policy size
+    /// limit and the storage quota up front, so an oversized upload is rejected before
+    /// any bytes are transferred.
     pub declared_size: u64,
-    /// Client hint for the preferred part size in bytes. The server may override
-    /// it to satisfy the backend's minimum part size requirements (FEATURE §3).
+    /// Preferred part size in bytes (hint); the server may override it to meet the
+    /// backend's minimum part size.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preferred_part_size: Option<u64>,
-    /// Advisory hint for upload concurrency; does not change the parts plan
-    /// (FEATURE §3).
+    /// Advisory upload concurrency; does not change the parts plan.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<u32>,
 }
 
-/// One part in the server-authoritative parts plan.
+/// One part in the parts plan.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(response)]
 pub struct MultipartPartPlanDto {
@@ -655,16 +628,16 @@ pub struct MultipartPartPlanDto {
     pub upload_url: String,
 }
 
-/// Server-authoritative parts plan returned by `POST /files/{id}/multipart`.
+/// Parts plan returned by `POST /files/{id}/multipart`.
 ///
-/// The client `PUT`s each part's bytes to its `upload_url`; the sidecar
-/// enforces the `size` claim before writing any bytes (FEATURE §4).
+/// The client `PUT`s each part to its `upload_url`; the size is enforced before any
+/// bytes are written.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(response)]
 pub struct MultipartPlanDto {
     pub upload_id: Uuid,
     pub version_id: Uuid,
-    /// Hash algorithm used for per-part hashes (`"SHA-256"` in P2).
+    /// Hash algorithm used for per-part hashes (`"SHA-256"`).
     pub part_hash_algorithm: String,
     /// Uniform part size in bytes (the final part may be smaller).
     pub part_size: u64,
@@ -675,13 +648,8 @@ pub struct MultipartPlanDto {
     pub expires_at: time::OffsetDateTime,
 }
 
-/// Response of `POST /files/{id}/multipart/{upload_id}/complete` (item 3.3).
-///
-/// Carries everything the ADR-0006 assembly step already computes — the
-/// bound version id, its size, and the composite content hash — instead of
-/// the previous bare `204 No Content`. `manifest` lets a client independently
-/// re-verify the composite hash (`docs/features/content-hash-modes.md`
-/// §"Client-Side Manifest Re-Verification") without a second round-trip.
+/// Response of `POST /files/{id}/multipart/{upload_id}/complete`: the bound version,
+/// its size, and the composite content hash. `manifest` lets a client re-verify the hash.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(response)]
 pub struct MultipartCompleteDto {
@@ -689,16 +657,16 @@ pub struct MultipartCompleteDto {
     pub size: i64,
     /// Always `"SHA-256"`.
     pub hash_algorithm: String,
-    /// Hex-encoded ADR-0006 composite root (`sha256(manifest)`).
+    /// Hex-encoded composite hash (`sha256` of the manifest).
     pub content_hash: String,
     /// Always `"multipart-composite-sha256"` for this endpoint.
     pub hash_mode: String,
     pub part_count: i32,
-    /// Wire-format manifest text (`Manifest::to_wire_string`).
+    /// Part manifest text the composite hash is computed over.
     pub manifest: String,
 }
 
-/// One already-uploaded part (`GET /files/{id}/multipart/{upload_id}`, item 3.4).
+/// One already-uploaded part (`GET /files/{id}/multipart/{upload_id}`).
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(response)]
 pub struct ReceivedPartDto {
@@ -708,10 +676,9 @@ pub struct ReceivedPartDto {
     pub uploaded_at: OffsetDateTime,
 }
 
-/// One part not yet uploaded (item 3.4).
+/// One part not yet uploaded.
 ///
-/// `upload_url` is present only while the session is still `in_progress` and
-/// unexpired; a terminal or expired session omits it.
+/// `upload_url` is present only while the session is `in_progress` and unexpired.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(response)]
 pub struct MissingPartDto {
@@ -722,14 +689,10 @@ pub struct MissingPartDto {
     pub upload_url: Option<String>,
 }
 
-/// Response of `GET /files/{id}/multipart/{upload_id}` — introspect/resume
-/// (item 3.4).
+/// Response of `GET /files/{id}/multipart/{upload_id}`.
 ///
-/// Mirrors [`crate::domain::multipart::MultipartUploadStatus`]. `received`
-/// covers parts already reported by the sidecar; `missing` covers the rest,
-/// each carrying a fresh resume `upload_url` when the session can still be
-/// resumed (`in_progress` and unexpired) — a terminal or expired session
-/// reports state and part accounting only, with no URLs to act on.
+/// `received` lists uploaded parts; `missing` the rest, each with a fresh resume
+/// `upload_url` only while the session is `in_progress` and unexpired.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(response)]
 pub struct MultipartStatusDto {
@@ -748,8 +711,6 @@ pub struct MultipartStatusDto {
     pub missing: Vec<MissingPartDto>,
 }
 
-// ── Backend migration DTOs (P2-M4) ─────────────────────────────────────────────
-
 /// Request to migrate a file's content to a different storage backend.
 #[derive(Debug, Clone)]
 #[toolkit_macros::api_dto(request)]
@@ -757,8 +718,6 @@ pub struct MigrateBackendReq {
     /// The id of the target backend to migrate the file's content to.
     pub target_backend_id: String,
 }
-
-// ── Ownership transfer DTOs (P2-M5) ───────────────────────────────────────────
 
 /// Request to transfer ownership of a file (`POST /files/{id}/transfer`).
 #[derive(Debug, Clone)]

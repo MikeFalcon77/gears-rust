@@ -1,4 +1,4 @@
-//! Multipart upload session intent methods (P2-M3).
+//! Multipart upload session intent methods.
 
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -9,8 +9,6 @@ use crate::domain::multipart::{MultipartPart, MultipartUploadSession};
 use crate::infra::storage::store::Store;
 
 impl Store {
-    // ── multipart uploads (P2-M3) ─────────────────────────────────────────────
-
     /// Create a multipart upload session row.
     #[allow(clippy::too_many_arguments)]
     pub async fn create_multipart_upload(
@@ -78,11 +76,8 @@ impl Store {
             .await
     }
 
-    /// Whether `file_id` currently has at least one `in_progress` multipart
-    /// upload session (regardless of `expires_at`).
-    ///
-    /// P2 2.8 orphan-file-reconciliation guard -- see
-    /// `MultipartRepo::has_in_progress_for_file`.
+    /// Whether `file_id` has an `in_progress` session regardless of `expires_at`
+    /// (see `MultipartRepo::has_in_progress_for_file`).
     pub async fn has_in_progress_multipart_for_file(
         &self,
         file_id: Uuid,
@@ -94,11 +89,8 @@ impl Store {
             .await
     }
 
-    /// Force-set a session's `expires_at`. **Test-support only; do not call
-    /// in production** -- see `MultipartRepo::set_expires_at` for why this
-    /// exists and why it is `#[doc(hidden)]` rather than gated behind a
-    /// Cargo feature (it is called from the external integration-test crate
-    /// `tests/cleanup_test.rs`).
+    /// Force-set a session's `expires_at`. **Test-support only; do not call in
+    /// production** (see `MultipartRepo::set_expires_at`).
     #[doc(hidden)]
     pub async fn set_multipart_expires_at_for_test(
         &self,
@@ -121,15 +113,9 @@ impl Store {
         self.repos.multipart.list_parts(&conn, upload_id).await
     }
 
-    /// Mark a multipart upload session as `completed` and record the audit row
-    /// in the same transaction.
-    ///
-    /// Also flips `mime_validated` to `true` in the same UPDATE (P2
-    /// remediation item 1.10): by the time `MultipartService::complete_multipart_upload`
-    /// calls this, it has already sniffed the assembled object's leading
-    /// bytes and validated them against `session.declared_mime` (bailing out
-    /// with `DomainError::mime_mismatch` before ever reaching this call on a
-    /// mismatch) — so reaching this point means the content is validated.
+    /// Mark a session `completed` (also setting `mime_validated`: the caller has already
+    /// sniffed and validated the assembled object) and record the audit row in the same
+    /// transaction. Returns `false` on a stale transition.
     pub async fn complete_multipart_upload(
         &self,
         upload_id: Uuid,
@@ -153,8 +139,7 @@ impl Store {
             .await
     }
 
-    /// Mark a multipart upload session as `aborted` and record the audit row
-    /// in the same transaction.
+    /// Mark a session `aborted` and record the audit row in the same transaction.
     pub async fn abort_multipart_upload(
         &self,
         upload_id: Uuid,

@@ -27,16 +27,14 @@ use crate::infra::metrics::FileStorageMetricsMeter;
 use crate::infra::signed_url::Issuer;
 use crate::infra::storage::Store;
 
-/// Default + in-memory backend ids configured in P1 (static).
+/// Ids of the always-present `local-fs` backend and the optional `memory` backend.
 const LOCAL_FS_ID: &str = "local-fs";
 const MEMORY_ID: &str = "memory";
 
 /// `FileStorage` control-plane gear.
 ///
-/// `capabilities = [db, rest]`: owns the metadata DB (P1 migration), the
-/// control-plane REST surface (`/api/file-storage/v1`). Content never transits
-/// this gear — it moves over signed URLs against the sidecar. There is no
-/// background worker: cleanup is not run by this gear.
+/// Owns the metadata DB and the REST surface (`/api/file-storage/v1`). Content never
+/// transits this gear (signed URLs against the sidecar), and it runs no background worker.
 #[toolkit::gear(
     name = "file-storage",
     deps = [authz_resolver],
@@ -46,9 +44,7 @@ pub struct FileStorageGear {
     service: OnceLock<Arc<FileService>>,
     multipart_service: OnceLock<Arc<MultipartService>>,
     policy_service: OnceLock<Arc<PolicyService>>,
-    /// P2 0.1 remaining: interim gear-local shared-secret credential for the
-    /// s2s finalize/report-part callback routes — see
-    /// `crate::api::rest::handlers::FinalizeAuth`.
+    /// Shared-secret credential for the s2s callbacks (`handlers::FinalizeAuth`).
     finalize_auth: OnceLock<Arc<crate::api::rest::handlers::FinalizeAuth>>,
 }
 
@@ -74,10 +70,7 @@ impl Gear for FileStorageGear {
             "Loaded file-storage config"
         );
 
-        // P2 0.1 remaining: interim gear-local shared-secret credential for
-        // the s2s finalize/report-part callback routes. `cfg.validate()` above
-        // already rejected an absent/empty secret, so this is a plain
-        // construction.
+        // `cfg.validate()` already rejected an absent/empty secret.
         let secret = cfg
             .finalize_internal_secret
             .as_ref()
@@ -92,16 +85,11 @@ impl Gear for FileStorageGear {
 
         let db: Arc<DBProvider<DbError>> = Arc::new(ctx.db_required()?);
 
-        // P1 static backends: a local filesystem backend (always present)
-        // plus an optional in-memory backend, satisfying the "≥2 backend
-        // types" target for dev/test without shipping a non-durable backend
-        // to every deployment by default.
         let backends =
             build_backend_registry(&cfg).map_err(|e| anyhow::anyhow!("backend registry: {e}"))?;
 
-        // URL-signing key. A configured seed yields a keypair that is stable
-        // across restarts (so the sidecar's public key keeps verifying issued
-        // URLs); without one we fall back to an ephemeral key for local dev.
+        // A configured seed keeps the keypair stable across restarts; otherwise the key
+        // is ephemeral (local dev).
         let max_ttl = i64::try_from(cfg.max_url_ttl_secs).unwrap_or(i64::MAX);
         let issuer = Arc::new(if let Some(seed_b64) = &cfg.signing_key_seed {
             let seed = URL_SAFE_NO_PAD
@@ -122,9 +110,8 @@ impl Gear for FileStorageGear {
             "file-storage URL-signing public key (configure FS_SIDECAR_PUBLIC_KEY with this)"
         );
 
-        // Per-type access decisions via the platform Authorization Service
-        // (`cpt-cf-file-storage-fr-authorization`). Tenant-boundary enforcement
-        // is independent of the PDP (point ops prefetch within the tenant;
+        // Per-type access decisions via the platform Authorization Service. Tenant
+        // isolation is independent of the PDP (point ops prefetch within the tenant;
         // listing applies the tenant scope).
         let authz = ctx
             .client_hub()
@@ -140,9 +127,6 @@ impl Gear for FileStorageGear {
             idempotency_ttl_secs: cfg.idempotency_ttl_secs,
         };
 
-        // P2 1.8 remediation: OTel Meter obtained via meter_with_scope, mirroring
-        // mini-chat's `infra::metrics::MiniChatMetricsMeter` wiring pattern
-        // (gears/mini-chat/mini-chat/src/gear.rs).
         let metrics_scope =
             opentelemetry::InstrumentationScope::builder(Self::MODULE_NAME.to_owned()).build();
         let metrics: Arc<dyn FileStorageMetricsPort> = Arc::new(FileStorageMetricsMeter::new(
@@ -152,35 +136,21 @@ impl Gear for FileStorageGear {
 
         let store = Store::new(Arc::clone(&db));
 
-        // Upcast to the narrow capability traits before distributing.
-        // `Store` is Clone, so each consumer gets its own clone wrapped in Arc.
         let multipart_store: Arc<dyn MultipartStore> = Arc::new(store.clone());
         let policy_store: Arc<dyn PolicyStore> = Arc::new(store.clone());
 
-        // Extract values needed by both services before moving svc_cfg.
+        // Needed by both services before `svc_cfg` is moved.
         let sidecar_base_url = svc_cfg.sidecar_base_url.clone();
         let url_ttl_secs = svc_cfg.default_url_ttl_secs;
 
-        // TODO(P2): wire the quota-enforcement client once the Quota Enforcement
-        // gear exposes an SDK crate. For now, no quota checks are performed.
+        // TODO: wire the quota-enforcement client once the Quota Enforcement gear
+        // exposes an SDK crate; until then no quota checks are performed.
         //
-        // TODO(P2 1.12 remediation): wire the usage reporter off `None`.
-        // `usage-collector-sdk`'s `UsageCollectorClientV1` (resolved the same
-        // way `authz_resolver_sdk::AuthZResolverApi` is resolved just
-        // above) is mechanically reachable via `ctx.client_hub().get::<...>()`,
-        // but an adapter from this gear's simple `UsageDelta{bytes_delta,
-        // file_count_delta}` shape to the collector's actual wire model is a
-        // non-trivial design decision, not a mechanical wiring step:
-        // `UsageRecord` requires a registered `UsageTypeGtsId` (a `create_usage_type`
-        // call this gear would need to own/idempotently ensure), a per-call
-        // `idempotency_key`, a `resource_ref`, and -- critically -- negative
-        // deltas are modeled as *compensations* (`corrects_id` pointing back
-        // at the specific prior credit record's `uuid`), which this gear does
-        // not currently track anywhere. Emitting bare negative-value counter
-        // rows without that lineage would violate the collector's L1
-        // referential rule. Symmetry of the deltas themselves (this
-        // remediation's actual bug) is fixed below and is independent of this
-        // follow-up.
+        // TODO: wire the usage reporter (currently `None`). `UsageCollectorClientV1` is
+        // reachable via `ctx.client_hub()`, but mapping `UsageDelta` to the collector
+        // model needs a registered usage type, per-call idempotency keys, and
+        // compensation records (`corrects_id`) for negative deltas, which this gear
+        // does not track.
         let service = Arc::new(
             FileService::new(
                 store,
@@ -208,7 +178,7 @@ impl Gear for FileStorageGear {
                 url_ttl_secs,
             )
             .with_metrics(Arc::clone(&metrics))
-            .with_usage_reporter(None), // see TODO above `service`
+            .with_usage_reporter(None), // see TODO above
         );
         self.multipart_service.set(multipart_svc).map_err(|_| {
             anyhow::anyhow!(
@@ -232,19 +202,9 @@ impl Gear for FileStorageGear {
     }
 }
 
-/// Builds the backend registry from config: `local-fs` is always present and
-/// is the default (unless overridden — see below); the non-durable `memory`
-/// backend only joins when `cfg.enable_in_memory_backend` is set (dev/test
-/// opt-in — see `FileStorageConfig::enable_in_memory_backend`); zero or more
-/// `S3Backend`s join per `cfg.s3_backends` entry (P2 1.7.3 config wiring).
-/// Extracted as a free function so it is unit-testable without a live
-/// `GearCtx`.
-///
-/// `cfg.default_backend_id` (P2 1.7 Stage 6 e2e wiring), when set, overrides
-/// the registry's default backend — e.g. so a deployment/test harness can
-/// make a configured S3 backend the target of new `create`/
-/// `initiate_multipart` calls instead of `local-fs`. An id naming no
-/// configured backend fails fast via `BackendRegistry::new`'s own validation.
+/// Builds the backend registry from config: `local-fs` always, `memory` if enabled, plus
+/// one `S3Backend` per `cfg.s3_backends` entry. `cfg.default_backend_id` overrides the
+/// default (`local-fs`); an unknown id fails via `BackendRegistry::new`.
 fn build_backend_registry(
     cfg: &FileStorageConfig,
 ) -> Result<BackendRegistry, crate::domain::error::DomainError> {
@@ -255,9 +215,7 @@ fn build_backend_registry(
         backend_list.push(Arc::new(InMemoryBackend::new(MEMORY_ID)));
     }
     for s3_cfg in &cfg.s3_backends {
-        // `S3Backend::from_config` performs no I/O — a bad endpoint URL or
-        // missing credentials (with no env fallback) surfaces here as a
-        // regular `Err`, failing gear init fast rather than panicking.
+        // No I/O: a bad endpoint or missing credentials fail gear init here.
         let s3_backend = S3Backend::from_config(s3_cfg)?;
         backend_list.push(Arc::new(s3_backend));
     }

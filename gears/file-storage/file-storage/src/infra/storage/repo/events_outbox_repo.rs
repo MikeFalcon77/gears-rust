@@ -19,8 +19,7 @@ impl EventsOutboxRepo {
         Self
     }
 
-    /// Enqueue a file-event row into `conn` (which MUST be a transaction runner
-    /// so the row is committed atomically with the surrounding mutation).
+    /// Enqueue a file-event row; `conn` MUST be the surrounding transaction.
     pub async fn enqueue<C: DBRunner>(
         &self,
         conn: &C,
@@ -36,14 +35,13 @@ impl EventsOutboxRepo {
             occurred_at: Set(time::OffsetDateTime::now_utc()),
             published_at: Set(None),
         };
-        // No tenant scope on this table — allow_all() is intentional.
         secure_insert::<Entity>(am, &AccessScope::allow_all(), conn)
             .await
             .map_err(DomainError::from)?;
         Ok(())
     }
 
-    /// List event rows for a specific file ordered by occurrence time — useful in tests.
+    /// List event rows for a file ordered by occurrence time (used in tests).
     pub async fn list_for_file<C: DBRunner>(
         &self,
         conn: &C,
