@@ -56,11 +56,10 @@ pub struct SweepResult {
     pub idempotency_keys_deleted: u64,
 }
 
-/// The cleanup engine -- orchestrates the background sweep.
+/// The cleanup engine -- orchestrates one cleanup sweep.
 ///
-/// Call `run_sweep()` to execute one full cycle. The gear lifecycle wires a
-/// cancellable repeating sleep loop that calls this when
-/// `enable_background_sweep` is `true`.
+/// Call `run_sweep()` to execute one full cycle. The gear runs no background
+/// loop: a separate cleanup job is expected to call this.
 ///
 /// **P2 scope**: orphan reconciliation + retention-policy expiry.
 /// Backend blob-without-row reconciliation (cross-backend orphan enumeration via

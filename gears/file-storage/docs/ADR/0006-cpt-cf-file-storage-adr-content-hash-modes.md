@@ -97,9 +97,9 @@ upload with no re-read of the stored object, with no non-approved algorithm anyw
 ## Decision Outcome
 
 Chosen option: **exactly two content-hash modes, both SHA-256, each computed on-the-fly during upload, with no
-re-*hashing* re-read of the stored object at multipart `complete` time.** (Single-part `finalize` retains its
-existing whole-object read-back for defense-in-depth size/hash/MIME re-verification — see point 3 below; only the
-multipart-composite mode's assembly step avoids a full re-read.)
+re-*hashing* re-read of the stored object at multipart `complete` time.** (Single-part `finalize` likewise does not re-read the object: it trusts the sidecar-reported size/hash on the
+authenticated callback, checks the size against the stored object's length and reads only a MIME prefix — see
+point 3 below.)
 
 1. **Non-multipart upload → plain `sha256(whole object bytes)`.** The canonical whole-object hash — unchanged in
    shape. Computed by the sidecar's `put_stream` as bytes transit it. It is **not** represented as a
@@ -115,10 +115,10 @@ multipart-composite mode's assembly step avoids a full re-read.)
 3. **The multipart composite hash is never computed by re-downloading/re-reading the assembled stored object.** It is
    always computed on-the-fly, from the per-part digests already collected as bytes flow to the backend, inside the
    sidecar's streaming `upload_part_stream`. This removes the S3 `complete_multipart` re-`GetObject` that a flat-rehash
-   design would otherwise need. **This does not extend to single-part uploads**: `write.rs`'s
-   `read_back_and_hash_streaming` is still called on every single-part `finalize` (both `finalize_upload` and
-   `finalize_upload_by_token`) as a defense-in-depth re-derivation of size/hash/MIME from the real backend object —
-   that read-back was never proposed for elimination by this ADR and remains unchanged. `complete_multipart` does
+   design would otherwise need. **Single-part uploads follow the same principle**: finalize (both the in-process and the
+   token-authenticated path) no longer re-derives size/hash from the real backend object; it trusts the sidecar's
+   measured values (the callback is authenticated by the mandatory internal credential), checks the size via backend
+   metadata, and reads only a bounded MIME prefix. `complete_multipart` does
    still issue one bounded (~8 KiB) ranged `GetObject`/`read_prefix` against the assembled object, but only for MIME
    magic-byte sniffing (P2 remediation item 1.10), not to (re)compute the hash. See
    [below](#the-on-the-fly--no-re-read-principle-and-its-trust-model) for why this still closes the 0.1
@@ -172,8 +172,8 @@ depending on whether they arrived as a single-shot PUT or a one-part multipart s
 
 Every mode is computed **as bytes flow to the backend during upload**, never by reading the object back afterward.
 Concretely: the sidecar's streaming write path (`put_stream` for non-multipart, `upload_part`/`complete_multipart` for
-multipart) is the sole hash-computation site; `finalize_upload[_by_token]`'s current read-back-and-rehash step and
-`S3Backend::complete_multipart`'s post-`CompleteMultipartUpload` `GetObject` re-read are both removed.
+multipart) is the sole hash-computation site; the finalize read-back-and-rehash step and
+the S3 backend's post-`CompleteMultipartUpload` `GetObject` re-read are both removed.
 
 **Reconciliation with item 0.1.** 0.1's fix works by having the control plane independently re-derive `size`/
 `hash_value` from the stored bytes, so a client cannot forge them by lying in its finalize call. Removing the re-read
@@ -306,8 +306,8 @@ not be caught automatically.
 
 * **Removes the full-object re-hash read pass from multipart completion.** `S3Backend::complete_multipart`'s
   post-completion `GetObject`-and-rehash is eliminated — a genuine bandwidth/cost win at fleet scale for multipart
-  uploads specifically. **Single-part `finalize_upload[_by_token]`'s read-back-and-rehash is retained** (defense in
-  depth against a forged size/hash claim) and was never in scope for elimination; `complete_multipart` also still
+  uploads specifically. **Single-part finalize's read-back-and-rehash was later removed too** (the sidecar's measured size/hash is trusted on the
+  authenticated callback, with a size check against the stored object); `complete_multipart` also still
   issues one small bounded ranged read for MIME sniffing (see point 3 of the Decision Outcome above).
 * **The stored `(hash_mode, hash_value)`, plus the `version_hash_manifest` row where applicable, is the sole ground
   truth for verification going forward** — not something re-derived from gear config, and not dependent on any
@@ -361,8 +361,8 @@ All confirmation items are satisfied by the shipped code and tests:
   only the object bytes and the stored `version_hash_manifest` row, with no read of `multipart_upload_parts` (the
   test deletes the parts rows first).
 * [x] Integration test asserting the finalize-time `expected_hash` check still rejects a client-claimed hash that does
-  not match the sidecar's on-the-fly-computed value, for the `whole-sha256` mode (the read-back-and-rehash mismatch
-  path, unchanged).
+  not match the sidecar's on-the-fly-computed value, for the `whole-sha256` mode (superseded: finalize now persists
+  the sidecar-reported hash and no longer re-hashes).
 
 ## Pros and Cons of the Options
 

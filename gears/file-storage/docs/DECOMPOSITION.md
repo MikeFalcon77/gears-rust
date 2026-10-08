@@ -27,7 +27,7 @@ Updated:  2026-10-05 by Constructor Tech
 
 This document decomposes FileStorage's feature set beyond the core upload/versioning foundation. It covers the
 server-authoritative multipart upload path (§2.1), the **policy engine** (allowed-types / size / custom-metadata
-limits at tenant and user scope, §2.3), **retention rules + a background cleanup sweep** (whole-file retention
+limits at tenant and user scope, §2.3), **retention rules + a cleanup engine (not scheduled yet)** (whole-file retention
 pruning and orphan reconciliation, §2.4), an **audit outbox** (transactional write-operation audit trail, §2.5), an
 **events outbox** (file lifecycle events, not drained to the platform EventBroker), **ownership transfer** (§2.6),
 and **backend migration** (§2.7). Each has its own DECOMPOSITION entry and FEATURE artifact under `docs/features/`,
@@ -196,7 +196,7 @@ gear's code. It remains a planned P2 requirement (see PRD.md/DESIGN.md).
 
 - **Status**: **Implemented.** Formalized in [ADR-0006](ADR/0006-cpt-cf-file-storage-adr-content-hash-modes.md) (`status: accepted`). `complete_multipart` builds the offset-manifest composite from already-collected per-part hashes with no re-read of the assembled object, and `migrate_backend` (§2.7) verifies mode-awarely.
 
-- **Purpose**: Replace the single implicit whole-object-SHA-256 hashing shape with exactly two explicit, mode-tagged content-hash modes -- non-multipart whole-object SHA-256 (unchanged: derived at finalize by the control plane's `read_back_and_hash_streaming`, never trusted from the caller) and multipart SHA-256 offset-manifest composite (new: root built at `complete` from already-stored per-part digests, with no read of the assembled object to compute it) -- and independently client-verifiable from the object bytes plus a small, durable manifest.
+- **Purpose**: Replace the single implicit whole-object-SHA-256 hashing shape with exactly two explicit, mode-tagged content-hash modes -- non-multipart whole-object SHA-256 (unchanged mode; at finalize the control plane persists the sidecar-reported hash without re-reading the object) and multipart SHA-256 offset-manifest composite (new: root built at `complete` from already-stored per-part digests, with no read of the assembled object to compute it) -- and independently client-verifiable from the object bytes plus a small, durable manifest.
 
 - **Depends On**: `cpt-cf-file-storage-feature-multipart-coordinator` (this feature consumes the multipart plan's per-part offsets and the already-persisted `multipart_upload_parts.part_hash` values; it does not change that feature's endpoints or session lifecycle)
 
@@ -339,7 +339,7 @@ gear's code. It remains a planned P2 requirement (see PRD.md/DESIGN.md).
 - **Scope**:
   - `RetentionRuleBody`/`AgeRetention`/`InactivityRetention`/`MetadataRetention` domain types
   - `GET`/`POST /retention-rules`, `DELETE /retention-rules/{rule_id}`
-  - The background cleanup sweep: abandoned-pending-version reclamation (skips versions still
+  - The cleanup sweep engine (not scheduled by the gear yet): abandoned-pending-version reclamation (skips versions still
     backing a live in-progress or any completing multipart session), expired-multipart-session abort,
     retention-policy expiry (keyset-paginated file scan), expired idempotency-key purge
   - Per-tick time budget (`sweep_time_budget_secs`): each tick keeps taking further bounded batches per step,

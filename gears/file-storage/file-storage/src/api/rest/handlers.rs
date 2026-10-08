@@ -74,29 +74,24 @@ fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
 /// are deployable in this gear; swap the comparator below for
 /// `InternalAuthenticator` when that lands.
 ///
-/// When `secret` is `None` (the default — `FileStorageConfig::finalize_internal_secret`
-/// unset), [`FinalizeAuth::verify`] is a no-op: the signed upload token
-/// (already verified by the caller) remains the sole authorization,
-/// preserving pre-0.1 behavior. When `Some`, callers must additionally
-/// present a matching `x-fs-internal-token` header.
+/// The secret (`FileStorageConfig::finalize_internal_secret`) is mandatory:
+/// [`FinalizeAuth::verify`] always requires a matching `x-fs-internal-token`
+/// header in addition to the signed upload token the caller already verified.
 pub struct FinalizeAuth {
-    secret: Option<String>,
+    secret: String,
 }
 
 impl FinalizeAuth {
     #[must_use]
-    pub fn new(secret: Option<String>) -> Self {
+    pub fn new(secret: String) -> Self {
         Self { secret }
     }
 
     /// Verify the `x-fs-internal-token` header against the configured
-    /// secret. No-op `Ok(())` when no secret is configured. Comparison is
-    /// constant-time to avoid leaking the secret through response-timing
-    /// side channels.
+    /// secret. Comparison is constant-time to avoid leaking the secret
+    /// through response-timing side channels.
     pub fn verify(&self, headers: &HeaderMap) -> Result<(), DomainError> {
-        let Some(expected) = self.secret.as_deref() else {
-            return Ok(());
-        };
+        let expected = self.secret.as_str();
         let provided = headers
             .get("x-fs-internal-token")
             .and_then(|v| v.to_str().ok());
@@ -728,8 +723,8 @@ pub async fn finalize_version(
 
     // P2 0.1 remaining: interim gear-local shared-secret credential gate —
     // AFTER token verification, additionally require a matching
-    // `x-fs-internal-token` header when a secret is configured. `None`
-    // (the default) preserves the token-only trust model above.
+    // `x-fs-internal-token` header. The reported size and hash are trusted
+    // on the strength of this credential.
     finalize_auth.verify(&headers)?;
 
     // P2 1.8 remediation: log the sidecar-propagated `x-request-id` (echoed

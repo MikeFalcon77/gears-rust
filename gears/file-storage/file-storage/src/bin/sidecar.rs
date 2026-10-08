@@ -22,13 +22,12 @@
 //!   - `FS_SIDECAR_FINALIZE_CONNECT_TIMEOUT_SECS` — connect timeout (seconds) for the
 //!     same callbacks (default `5`). Together these bound how long a client's upload
 //!     request can be held open by an unreachable or hung control plane (P2 1.5).
-//!   - `FS_SIDECAR_INTERNAL_TOKEN` — optional interim gear-local shared secret (P2
-//!     0.1 remaining) sent as the `x-fs-internal-token` header on BOTH the finalize
-//!     and report-part control-plane callbacks. Unset/empty = the header is not
-//!     sent, which is exactly what a control plane with
-//!     `FileStorageConfig::finalize_internal_secret` unset expects. Must match the
-//!     control plane's configured secret once it flips
-//!     `require_finalize_internal_secret` on (see the migration-path note in
+//!   - `FS_SIDECAR_INTERNAL_TOKEN` — **required**: the interim gear-local shared
+//!     secret (P2 0.1 remaining) sent as the `x-fs-internal-token` header on BOTH
+//!     the finalize and report-part control-plane callbacks. The sidecar refuses
+//!     to start when it is unset/empty. Must equal the control plane's
+//!     `FileStorageConfig::finalize_internal_secret`; the control plane trusts the
+//!     size and SHA-256 reported on these callbacks (see
 //!     `docs/ADR/0003-…-sidecar-data-plane.md`).
 //!   - `FS_SIDECAR_S3_BACKENDS` — P2 1.7.3 config wiring: an optional JSON array of
 //!     `file_storage::config::S3BackendConfig` entries, e.g. a single entry
@@ -104,9 +103,9 @@ struct SidecarState {
     /// Empty string = finalize callback disabled (dev/no-control-plane mode).
     control_base_url: String,
     /// Interim gear-local shared secret (P2 0.1 remaining, `FS_SIDECAR_INTERNAL_TOKEN`)
-    /// sent as `x-fs-internal-token` on the finalize/report-part callbacks. `None` =
-    /// header not sent (matches a control plane with the check disabled).
-    internal_token: Option<String>,
+    /// sent as `x-fs-internal-token` on the finalize/report-part callbacks.
+    /// Mandatory: startup fails when it is unset/empty.
+    internal_token: String,
     http: reqwest::Client,
     /// Metrics port (P2 1.8 remediation) — ingress/egress bytes and
     /// route/method/status/latency for the sidecar's own HTTP routes. The
@@ -185,17 +184,18 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("reqwest client: {e}"))?;
 
-    // `FS_SIDECAR_INTERNAL_TOKEN` (P2 0.1 remaining) — attached as
-    // `x-fs-internal-token` on both callbacks below. Unset/empty = not sent.
+    // `FS_SIDECAR_INTERNAL_TOKEN` (P2 0.1 remaining) — mandatory; attached as
+    // `x-fs-internal-token` on both callbacks below. Fail fast when absent so a
+    // misconfigured sidecar never starts and then has every finalize rejected.
     let internal_token = std::env::var("FS_SIDECAR_INTERNAL_TOKEN")
         .ok()
-        .filter(|s| !s.is_empty());
-    if internal_token.is_some() {
-        tracing::info!(
-            "sidecar configured with FS_SIDECAR_INTERNAL_TOKEN \u{2014} finalize/report-part \
-             callbacks will carry x-fs-internal-token"
-        );
-    }
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "FS_SIDECAR_INTERNAL_TOKEN is required (must equal the control plane's \
+                 finalize_internal_secret)"
+            )
+        })?;
 
     // `FS_SIDECAR_S3_BACKENDS` (P2 1.7.3 config wiring) — a JSON array of
     // `S3BackendConfig` entries. Parsed and eagerly constructed here (so a
@@ -581,14 +581,13 @@ const CALLBACK_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// so both callbacks get the same bounded-retry behavior (P2 1.5).
 ///
 /// `internal_token` (P2 0.1 remaining, `SidecarState::internal_token`) is
-/// attached as `x-fs-internal-token` when present; `None` omits the header
-/// entirely (works against a control plane with the check disabled).
+/// always attached as `x-fs-internal-token`.
 async fn post_with_retry(
     http: &reqwest::Client,
     url: &str,
     token: &str,
     request_id: &str,
-    internal_token: Option<&str>,
+    internal_token: &str,
     body_bytes: &[u8],
 ) -> Result<reqwest::Response, reqwest::Error> {
     use tokio_retry::RetryIf;
@@ -610,9 +609,7 @@ async fn post_with_retry(
         }
         // P2 0.1 remaining: interim shared-secret credential, see the doc
         // comment above.
-        if let Some(internal_token) = internal_token {
-            req = req.header("x-fs-internal-token", internal_token);
-        }
+        req = req.header("x-fs-internal-token", internal_token);
         let fut = req.body(body_bytes.to_vec()).send();
         async move {
             let result = fut.await;
@@ -672,7 +669,7 @@ async fn finalize_with_control_plane(
         &url,
         token,
         request_id,
-        state.internal_token.as_deref(),
+        &state.internal_token,
         &body_bytes,
     )
     .await
@@ -772,7 +769,7 @@ async fn report_part_with_control_plane(
         &url,
         token,
         request_id,
-        state.internal_token.as_deref(),
+        &state.internal_token,
         &body_bytes,
     )
     .await

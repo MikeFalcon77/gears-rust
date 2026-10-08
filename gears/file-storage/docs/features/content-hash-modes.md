@@ -353,10 +353,9 @@ list carrying every part's number, offset, SHA-256 digest, and backend ETag; cal
 operation; and persists the returned manifest root as the version's stored hash plus the manifest text (in the
 manifest table) as part of finalizing the version.
 
-**Single-part finalize**: both finalize paths (token-authenticated and legacy) stream the blob back from the
-backend, recompute SHA-256 incrementally, and reject on any divergence from the client-claimed digest — the control
-plane never trusts the caller's claim. This read-back is retained for mode 1 -- only the multipart (mode 2) path
-avoids re-reading the assembled object.
+**Single-part finalize**: both finalize paths (token-authenticated and legacy) trust the digest the sidecar measured
+while streaming (the callback is authenticated by the mandatory internal credential), check the claimed size
+against the stored object's length and read only a bounded MIME prefix. Neither mode re-reads the object.
 
 **Backend migration**: streams the blob from the source backend straight into the destination — never buffering the
 whole object in memory — verifying it mode-aware on the same pass: for `whole-sha256` it hashes the streamed bytes
@@ -409,11 +408,10 @@ algorithm choice, only a per-mode *shape* difference in what `hash_value`
 means.
 
 **Wire-hash rules over the two modes.**
-Mode 1's whole-object hash is derived by the **control plane at finalize**,
-not from the caller: `finalize_upload`/`finalize_upload_by_token` re-read the
-stored object via `read_back_and_hash_streaming` and recompute size/hash from
-the real bytes, and that recomputed `actual_hash` is what is stored — so
-single-shot's persisted hash is verifier-derived, never trusted from the
+Mode 1's whole-object hash is the one the **sidecar measured while streaming**
+and reported on the authenticated finalize callback: `finalize_upload`/`finalize_upload_by_token` check the size
+against the stored object's length and persist the reported hash without re-reading the object — so
+single-shot's persisted hash is sidecar-derived, trusted from the
 caller. Mode 2's manifest and root are built entirely from already-computed
 per-part digests (`multipart_upload_parts.part_hash`) **with no read of the
 assembled object to compute the root** — this is the mode for which "no
@@ -427,22 +425,18 @@ the root.)
 #### Mode 1 — non-multipart, whole-object SHA-256
 
 - **Per-part computation**: N/A (single stream).
-- **Complete computation**: at finalize the control plane streams the stored
-  object back (`read_back_and_hash_streaming`) and recomputes size/hash from
-  the real bytes; that recomputed `actual_hash` is what is stored (the sidecar
-  never records the caller's claimed digest for this mode).
+- **Complete computation**: at finalize the control plane persists the
+  sidecar-reported hash after a size check against the stored object; it does
+  not re-read the object.
 - **Stored fields**: `hash_algorithm = 'SHA-256'`, `hash_mode =
   'whole-sha256'`, `hash_value` = 32-byte whole-object SHA-256 digest. No
   manifest row for this mode — it is **not** represented as a 1-part
   manifest; there is nothing to reconstruct beyond re-hashing the bytes.
-- **Verification/recompute**: the finalize read-back recomputes SHA-256 over the
-  stored bytes and **compares** it with the digest the upload actually reported
-  — the sidecar's digest passed in the finalize-callback `hash_value`
-  (`finalize_upload_by_token`), or the in-process data-plane digest
-  (`finalize_upload`) — and a mismatch is rejected (`hash_mismatch`); only the
-  recomputed `actual_hash` is persisted as `hash_value`.
-- **Re-download avoided?** No — single-shot deliberately re-reads once at
-  finalize to derive the stored hash (verifier-driven, never caller-trusted).
+- **Verification/recompute**: none at finalize beyond the size check — the
+  digest the upload reported (the sidecar's, passed in the finalize-callback
+  `hash_value`, or the in-process data-plane digest) is persisted as
+  `hash_value`.
+- **Re-download avoided?** Yes — single-shot no longer re-reads at finalize.
 
 #### Mode 2 — multipart, SHA-256 offset-manifest composite
 
@@ -859,7 +853,7 @@ Key points:
 
 | Backend | Mode 1 (`whole-sha256`) | Mode 2 (`multipart-composite-sha256`) |
 |---|---|---|
-| **S3** (`s3.rs`) | `put_stream` | `upload_part_stream` computes a flat per-part SHA-256 (streamed, never buffering a whole part) and threads `part_offset` through; `complete_multipart` calls `CompleteMultipartUpload` (S3 still needs the ETags to assemble) **then builds the manifest and computes `root` from the already-collected `(offset, part_hash)` pairs**, without calling `read_back_and_hash_streaming`. **Every large multipart upload thereby avoids the mandatory re-`GetObject`** a full re-read would otherwise cost — no redundant read of a potentially multi-GB object, no doubled egress/bandwidth. |
+| **S3** (`s3.rs`) | `put_stream` | `upload_part_stream` computes a flat per-part SHA-256 (streamed, never buffering a whole part) and threads `part_offset` through; `complete_multipart` calls `CompleteMultipartUpload` (S3 still needs the ETags to assemble) **then builds the manifest and computes `root` from the already-collected `(offset, part_hash)` pairs**, without a full re-read. **Every large multipart upload thereby avoids the mandatory re-`GetObject`** a full re-read would otherwise cost — no redundant read of a potentially multi-GB object, no doubled egress/bandwidth. |
 | **In-memory** (`in_memory.rs`) | as above | `upload_part_stream` as above; `complete_multipart` builds the manifest/root instead of `hash::sha256(&assembled)` (it still assembles bytes into the blob store for a later `get_stream` read, but computing the **hash** does not require touching those bytes) |
 | **local-fs** (`local_fs.rs`) | unchanged (single-object writes only) | **N/A — still no multipart support.** `initiate_multipart`/`upload_part_stream`/`complete_multipart`/`abort_multipart` remain the trait's default `Err(multipart_not_supported)`. If local-fs multipart is ever added, it needs no special accommodation for this mode beyond any other backend — offsets and per-part digests are backend-agnostic inputs to the same shared `Manifest` builder. |
 

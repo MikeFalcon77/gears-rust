@@ -434,7 +434,7 @@ content is orphaned content reclaimed by the same mechanism as any other orphan
 bypassing file type policies. Content-type validation ensures declared types are trustworthy for downstream consumers
 and policy enforcement. Validating the assembled object once, at completion, rather than the first part in isolation,
 gives the same guarantee without requiring every backend's minimum part size to exceed the longest magic-byte
-sequence, and it reuses the identical bounded-prefix sniff the single-part path already performs on read-back.
+sequence, and it reuses the identical bounded-prefix sniff the single-part path already performs on a ranged read.
 **Actors**: `cpt-cf-file-storage-actor-platform-user`, `cpt-cf-file-storage-actor-cf-gears`
 
 ### 5.2 Ownership & Access Control
@@ -726,7 +726,9 @@ it prevents accidental data loss and gives consuming gears predictable storage s
 
 #### Retention Policies
 
-- [x] `p2` - **ID**: `cpt-cf-file-storage-fr-retention-policies`
+- [ ] `p2` - **ID**: `cpt-cf-file-storage-fr-retention-policies`
+
+**Status — not enforced yet:** rules can be stored, but the gear runs no background worker, so expiry is not enforced until a separate cleanup job exists.
 
 The system **MUST** allow owners to define retention policies specifying automatic file expiration based on age,
 inactivity, or custom metadata criteria. The system **MUST** also support per-file retention overrides set by the file
@@ -767,7 +769,9 @@ Serverless Runtime client anywhere in this gear's code; the requirement remains 
 
 #### Orphan Reconciliation
 
-- [x] `p2` - **ID**: `cpt-cf-file-storage-fr-orphan-reconciliation`
+- [ ] `p2` - **ID**: `cpt-cf-file-storage-fr-orphan-reconciliation`
+
+**Status — not enforced yet:** the gear runs no background worker, so abandoned `pending` versions, expired multipart sessions and expired idempotency keys are not reconciled until a separate cleanup job exists.
 
 The system **MUST** automatically detect and reconcile orphan state between the metadata store and storage backends.
 Because content is uploaded to the sidecar and the version is only later **bound** in the metadata DB (the two writes
@@ -1316,7 +1320,7 @@ The priority order and the trade-off rule are those of §6.4.
   requests (multipart: N + 2); Gears call an in-process SDK; storage backends are chosen by configuration.
 - **North Star — Total Cost of Ownership (TCO)**: Inherited — cost is modelled at the platform level (§6.2). The gear
   bounds its own cost drivers: bytes transit only the sidecar (`cpt-cf-file-storage-nfr-bandwidth`), memory per
-  transfer is bounded by streaming, and background cleanup runs under a per-tick time budget.
+  transfer is bounded by streaming, and cleanup (once a cleanup job exists) is bounded by a time budget.
 
 | Framework metric | Position | Reference |
 |---|---|---|
@@ -1755,7 +1759,7 @@ code; see `cpt-cf-file-storage-fr-owner-deletion`.
 - [x] Restore rebinds `content_id` to a prior version (pointer swap, no re-upload), under the same authorization as a
   content write
 - [x] In P1 versions are retained indefinitely (no automatic cleanup); P2 prunes via the retention policy +
-  reconciliation engine
+  reconciliation engine (**Not enforced yet:** no background worker runs it)
 - [x] Permanent delete of a specific version removes only that version
 - [x] Declared capabilities are independently configurable (enable/disable) per backend
 - [x] A capability disabled by configuration behaves identically to an unsupported capability
@@ -1767,7 +1771,7 @@ code; see `cpt-cf-file-storage-fr-owner-deletion`.
 - [x] An optional metadata-revision precondition on metadata-only updates returns `400 failed_precondition` on mismatch, giving
   lost-update protection for concurrent metadata writers; when omitted, metadata updates remain last-write-wins
 - [x] An upload whose bind never completes leaves no current pointer to it; the orphan `pending` version and its blob
-  are reconciled by the P2 cleanup engine (`cpt-cf-file-storage-fr-orphan-reconciliation`)
+  are reconciled by the P2 cleanup engine (`cpt-cf-file-storage-fr-orphan-reconciliation`) (**Not enforced yet:** no background worker runs it)
 - [x] Retried upload with the same idempotency key returns the original result (same `file_id`/`version_id`, fresh
   upload token) without creating a duplicate file, as long as the target version is still `pending`; once it is no
   longer `pending`, the retry is instead rejected with `409 Conflict` rather than re-minting a token against content
@@ -1790,8 +1794,8 @@ code; see `cpt-cf-file-storage-fr-owner-deletion`.
   (**Partial:** written to the `events_outbox`; no relay delivers them to EventBroker)
 - [x] HTTP Range requests return partial content for downloads; seeking and resumable downloads supported;
   `Accept-Ranges: bytes` set on every download response
-- [x] Retention policies automatically expire and delete files based on configured age, inactivity, or custom metadata
-  criteria; per-file retention overrides are honored
+- [ ] Retention policies automatically expire and delete files based on configured age, inactivity, or custom metadata
+  criteria; per-file retention overrides are honored (**Not enforced yet:** no background worker runs it)
 - [ ] Storage backends in P1 are loaded from the gear's own section of the platform YAML configuration at gear
   startup (no standalone TOML/JSON file); in P3, backends can
   be connected and configured at runtime via admin API without service rebuild (**Partial:** the P1 platform-YAML

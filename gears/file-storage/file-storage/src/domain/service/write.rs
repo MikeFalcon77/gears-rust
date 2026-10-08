@@ -2,12 +2,11 @@
 
 use std::collections::HashMap;
 
-use futures::StreamExt;
 use time::OffsetDateTime;
 use toolkit_security::{AccessScope, SecurityContext};
 use uuid::Uuid;
 
-use file_storage_sdk::{CustomMetadataPatch, File};
+use file_storage_sdk::{ByteRange, CustomMetadataPatch, File};
 
 use crate::domain::audit::{AuditEntry, AuditOperation};
 use crate::domain::authz::actions;
@@ -16,78 +15,60 @@ use crate::domain::etag;
 use crate::domain::policy::PolicyResolver;
 use crate::domain::service::{FileService, VersionRef};
 use crate::infra::backend::StorageBackend;
-use crate::infra::content::hash;
 use crate::infra::content::mime::{
     MIME_SNIFF_PREFIX_BYTES, enforce_size_ceiling_for_validated_mime, validate_and_resolve_mime,
 };
 use crate::infra::external_clients::UsageDelta;
 use crate::infra::signed_url::{Claims, Op, UploadConstraints};
 
-/// Read back the blob actually stored at `backend_path` on `backend`,
-/// streaming it chunk by chunk rather than buffering the whole object in
-/// memory (`cpt-cf-file-storage-fr-backend-abstraction`, memory-safety fix:
-/// finalize's read-back is the mirror image of `put_stream`'s streaming write
-/// and must be equally memory-bounded, not defeat it by buffering the whole
-/// object back in on the read side). Computes the actual byte count and
-/// SHA-256 digest incrementally via [`hash::Hasher`], while also capturing up
-/// to [`MIME_SNIFF_PREFIX_BYTES`] of the leading bytes for
-/// [`mime::validate`]'s magic-byte sniffing (which only ever inspects a small
-/// bounded prefix — see that constant's doc comment).
+/// Verify the object the sidecar reported as uploaded, without reading it back
+/// (`cpt-cf-file-storage-fr-backend-abstraction`). The finalize callback is
+/// authenticated by the mandatory internal credential and the sidecar measured
+/// the size and SHA-256 while streaming the PUT, so those are trusted. This
+/// only checks the stored length via backend metadata and reads the bounded
+/// leading prefix needed for [`validate_and_resolve_mime`]'s magic-byte
+/// sniffing (see [`MIME_SNIFF_PREFIX_BYTES`]).
 ///
 /// A genuinely missing object (no prior successful PUT) surfaces as
-/// `DomainError::validation("content", ...)` — the client's finalize raced
-/// ahead of a completed PUT, a 4xx the caller can act on. A backend/transport
-/// failure while opening or reading the object back (e.g. an S3 connection
-/// dropped mid-read of a fully-uploaded blob) instead preserves the underlying
-/// `DomainError::backend` error, so a transient 5xx is not misreported as
-/// "never uploaded" and its root cause is not discarded.
+/// `DomainError::validation("content", ...)`; any other backend failure
+/// propagates unchanged so a transient 5xx is not misreported as "never
+/// uploaded".
 ///
-/// Returns `(actual_size, actual_hash, mime_sniff_prefix)`.
-async fn read_back_and_hash_streaming(
+/// Returns the MIME sniff prefix (empty for a zero-length object).
+async fn check_uploaded_object(
     backend: &dyn StorageBackend,
     backend_path: &str,
-) -> Result<(i64, Vec<u8>, Vec<u8>), DomainError> {
-    let no_content_err = || {
-        DomainError::validation(
-            "content",
-            "no uploaded content found at the backend path; PUT was not completed",
-        )
-    };
-
-    let mut stream = match backend.get_stream(backend_path).await {
-        Ok(stream) => stream,
-        // Opening the read-back stream failed. Only a genuinely-absent object
-        // (finalize raced ahead of a completed PUT) is the caller's fault and
-        // maps to the not-found validation error; a backend/transport failure
-        // preserves its original `DomainError` so a transient 5xx is not
-        // masked as "never uploaded". `exists` is the authoritative signal —
-        // if it too fails, err on surfacing the real backend error.
-        Err(open_err) => {
+    claimed_size: i64,
+) -> Result<Vec<u8>, DomainError> {
+    let actual_size = match backend.size(backend_path).await {
+        Ok(n) => i64::try_from(n).unwrap_or(i64::MAX),
+        // `exists` is the authoritative absent/failed signal; if it too
+        // fails, surface the real backend error.
+        Err(size_err) => {
             return Err(match backend.exists(backend_path).await {
-                Ok(false) => no_content_err(),
-                _ => open_err,
+                Ok(false) => DomainError::validation(
+                    "content",
+                    "no uploaded content found at the backend path; PUT was not completed",
+                ),
+                _ => size_err,
             });
         }
     };
-
-    let mut hasher = hash::Hasher::new();
-    let mut prefix: Vec<u8> = Vec::with_capacity(MIME_SNIFF_PREFIX_BYTES);
-    while let Some(chunk) = stream.next().await {
-        // A mid-stream read error means the object opened fine and then the
-        // backend/transport failed partway through — it is never "not
-        // uploaded". Preserve it as a backend error (mirroring `put_stream`'s
-        // chunk handling) rather than collapsing it into the not-found case.
-        let chunk = chunk.map_err(|e| DomainError::backend(backend.id(), e.to_string()))?;
-        if prefix.len() < MIME_SNIFF_PREFIX_BYTES {
-            let take = (MIME_SNIFF_PREFIX_BYTES - prefix.len()).min(chunk.len());
-            prefix.extend_from_slice(&chunk[..take]);
-        }
-        hasher.update(&chunk);
+    if actual_size != claimed_size {
+        return Err(DomainError::validation(
+            "size",
+            "claimed size does not match the uploaded content",
+        ));
     }
-
-    let actual_size = i64::try_from(hasher.len()).unwrap_or(i64::MAX);
-    let actual_hash = hasher.finalize();
-    Ok((actual_size, actual_hash, prefix))
+    if actual_size == 0 {
+        return Ok(Vec::new());
+    }
+    let prefix_len = u64::try_from(MIME_SNIFF_PREFIX_BYTES).unwrap_or(u64::MAX);
+    let end = actual_size.cast_unsigned().min(prefix_len) - 1;
+    let prefix = backend
+        .get_range(backend_path, ByteRange::Inclusive { start: 0, end })
+        .await?;
+    Ok(prefix.to_vec())
 }
 
 impl FileService {
@@ -176,30 +157,18 @@ impl FileService {
             // @cpt-end:cpt-cf-file-storage-algo-enforce-policy-at-upload:p1:inst-enforce-return
         }
 
-        // Never trust the caller's claimed size/hash: stream the blob
-        // actually present at the version's backend path and recompute both
-        // from the real bytes, never buffering more than one chunk (plus a
-        // small MIME-sniff prefix) in memory regardless of object size. A
-        // finalize with no prior successful PUT (no object at that path) or a
-        // forged size/hash claim is rejected here rather than silently
-        // persisted.
-        let (actual_size, actual_hash, mime_sniff_prefix) =
-            read_back_and_hash_streaming(backend.as_ref(), &version.backend_path).await?;
-        if actual_size != size {
-            return Err(DomainError::validation(
-                "size",
-                "claimed size does not match the uploaded content",
-            ));
-        }
-        if actual_hash != hash_value {
-            return Err(DomainError::hash_mismatch(
-                hex::encode(&hash_value),
-                hex::encode(&actual_hash),
-            ));
-        }
+        // The callback is authenticated by the mandatory internal credential
+        // and the sidecar measured the size and SHA-256 while streaming the
+        // PUT, so the reported hash is trusted. Finalize only checks the
+        // stored length via backend metadata (a missing object or a size
+        // mismatch is rejected here) and reads just the MIME-sniff prefix.
+        let mime_sniff_prefix =
+            check_uploaded_object(backend.as_ref(), &version.backend_path, size).await?;
+        let actual_size = size;
+        let actual_hash = hash_value;
 
-        // Declared MIME type is never trustworthy either: validate the
-        // read-back blob's real bytes against `version_mime` (reusing the
+        // Declared MIME type is never trustworthy: validate the stored
+        // object's leading bytes against `version_mime` (reusing the
         // same magic-byte sniffing the in-process data plane runs at
         // ingress), rejecting a mismatch before anything is finalized. Only
         // the leading `MIME_SNIFF_PREFIX_BYTES` are needed — see that
@@ -230,9 +199,9 @@ impl FileService {
         );
         // @cpt-end:cpt-cf-file-storage-flow-audit-trail-record-write:p1:inst-audit-build
 
-        // Persist the read-back-derived size and the verified hash, not the
-        // caller's size claim. `validated_mime` is persisted in place of the
-        // client's original declaration.
+        // Persist the checked size and the sidecar-reported hash.
+        // `validated_mime` is persisted in place of the client's original
+        // declaration.
         // @cpt-begin:cpt-cf-file-storage-flow-audit-trail-record-write:p1:inst-audit-pass-through
         let ok = self
             .store
@@ -264,7 +233,7 @@ impl FileService {
         }
 
         // @cpt-cf-file-storage-fr-usage-reporting
-        // Credit the read-back-derived bytes now that the version is durably
+        // Credit the checked bytes now that the version is durably
         // finalized. `create_file` already reported `+1 file` with `0 bytes`
         // (bytes are unknown at creation time), so `file_count_delta` here is
         // `0` -- this is the byte-crediting complement that makes the total
@@ -705,30 +674,18 @@ impl FileService {
             // @cpt-end:cpt-cf-file-storage-algo-enforce-policy-at-upload:p1:inst-enforce-return
         }
 
-        // Never trust the caller's claimed size/hash: stream the blob
-        // actually present at the version's backend path and recompute both
-        // from the real bytes, never buffering more than one chunk (plus a
-        // small MIME-sniff prefix) in memory regardless of object size. A
-        // finalize with no prior successful PUT (no object at that path) or a
-        // forged size/hash claim is rejected here rather than silently
-        // persisted.
-        let (actual_size, actual_hash, mime_sniff_prefix) =
-            read_back_and_hash_streaming(backend.as_ref(), &version.backend_path).await?;
-        if actual_size != size {
-            return Err(DomainError::validation(
-                "size",
-                "claimed size does not match the uploaded content",
-            ));
-        }
-        if actual_hash != hash_value {
-            return Err(DomainError::hash_mismatch(
-                hex::encode(&hash_value),
-                hex::encode(&actual_hash),
-            ));
-        }
+        // The callback is authenticated by the mandatory internal credential
+        // and the sidecar measured the size and SHA-256 while streaming the
+        // PUT, so the reported hash is trusted. Finalize only checks the
+        // stored length via backend metadata (a missing object or a size
+        // mismatch is rejected here) and reads just the MIME-sniff prefix.
+        let mime_sniff_prefix =
+            check_uploaded_object(backend.as_ref(), &version.backend_path, size).await?;
+        let actual_size = size;
+        let actual_hash = hash_value;
 
-        // Declared MIME type is never trustworthy either: validate the
-        // read-back blob's real bytes against `version_mime` (reusing the
+        // Declared MIME type is never trustworthy: validate the stored
+        // object's leading bytes against `version_mime` (reusing the
         // same magic-byte sniffing the in-process data plane runs at
         // ingress), rejecting a mismatch before anything is finalized. Only
         // the leading `MIME_SNIFF_PREFIX_BYTES` are needed — see that
@@ -757,9 +714,9 @@ impl FileService {
             serde_json::json!({ "version_id": version_id, "size": size }),
         );
 
-        // Persist the read-back-derived size and the verified hash, not the
-        // caller's size claim. `validated_mime` is persisted in place of the
-        // client's original declaration.
+        // Persist the checked size and the sidecar-reported hash.
+        // `validated_mime` is persisted in place of the client's original
+        // declaration.
         let ok = self
             .store
             .finalize_version(

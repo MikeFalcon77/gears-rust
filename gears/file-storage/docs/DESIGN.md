@@ -116,12 +116,12 @@ See [PRD.md](./PRD.md) §1 "Overview" and §1.3 "Goals":
 
 | PRD FR ID                                              | Design Response                                                                                                                                                          |
 |--------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cpt-cf-file-storage-fr-upload-file`                   | Control `POST /files` (authz) → signed PUT URL to the sidecar; sidecar streams bytes (incremental SHA-256, no in-stream MIME check) to the backend object `/{file_id}/{version_id}`, then calls the token-authenticated **finalize** callback (`pending → available`, control-plane MIME check on read-back); with `bind: "manual"` the client then separately **binds** the version (`content_id`) under `If-Match` — the default `bind: "auto"` binds inline in finalize (see `cpt-cf-file-storage-fr-auto-bind`) |
+| `cpt-cf-file-storage-fr-upload-file`                   | Control `POST /files` (authz) → signed PUT URL to the sidecar; sidecar streams bytes (incremental SHA-256, no in-stream MIME check) to the backend object `/{file_id}/{version_id}`, then calls the token-authenticated **finalize** callback (`pending → available`, size check via backend metadata, control-plane MIME check on a ranged prefix read); with `bind: "manual"` the client then separately **binds** the version (`content_id`) under `If-Match` — the default `bind: "auto"` binds inline in finalize (see `cpt-cf-file-storage-fr-auto-bind`) |
 | `cpt-cf-file-storage-fr-download-file`                 | Control presign (authz) → signed GET URL to the sidecar; the sidecar streams the current `content_id` blob from its `backend-abstraction` driver                                                                                 |
 | `cpt-cf-file-storage-fr-delete-file`                   | Control `DELETE /files/{id}` (requires `If-Match`): **metadata-row-first** — the `files` row and **all** its version rows are deleted in a committed transaction and `204` is returned, *then* the sidecar deletes the backend objects best-effort; a failed backend delete leaves only unreferenced objects swept by the P2 cleanup engine (never a row pointing at missing bytes). Idempotent: re-deleting returns `404`. Sequence in §3.6 |
 | `cpt-cf-file-storage-fr-get-metadata`                  | Control `GET /files/{id}` (metadata JSON, supports `If-None-Match` → `304`) reads `files` + `files_custom_metadata` via `metadata-service` — no content on this surface; the sidecar has its own `HEAD` route on the signed download URL (same auth/`404` contract as `GET`, no body — api.md); there is no separate `HEAD` route on the control plane (§3.3) |
 | `cpt-cf-file-storage-fr-list-files`                    | `GET /files` with mandatory `owner_kind` filter; tenant-scoped DB query through `metadata-service`                                                                       |
-| `cpt-cf-file-storage-fr-content-type-validation`       | Validated on the **control plane, post-write**, not in-stream at the sidecar: `finalize`/`complete_multipart` read back a bounded MIME-sniff prefix (`infra::content::mime`, `MIME_SNIFF_PREFIX_BYTES` ≈ 8 KiB) and reject a declared/actual mismatch with `400`, before the version is ever marked `available` |
+| `cpt-cf-file-storage-fr-content-type-validation`       | Validated on the **control plane, post-write**, not in-stream at the sidecar: `finalize`/`complete_multipart` read a bounded MIME-sniff prefix (ranged read) (`infra::content::mime`, `MIME_SNIFF_PREFIX_BYTES` ≈ 8 KiB) and reject a declared/actual mismatch with `400`, before the version is ever marked `available` |
 | `cpt-cf-file-storage-fr-file-ownership`                | Columns `tenant_id`, `owner_kind`, `owner_id` on `files`; immutable except via P2 ownership transfer                                                                     |
 | `cpt-cf-file-storage-fr-authorization`                 | Control `authz-adapter` calls PolicyEnforcer with `gts.cf.fstorage.file.type.v1~<gts_file_type>~` on presign/bind; the signed URL carries the decision to the sidecar. The sidecar's finalize callback is authorized solely by that same signed token — no separate authz call, no app-token/on-behalf-of delegation |
 | `cpt-cf-file-storage-fr-tenant-boundary`               | DB queries scoped by `SecurityContext.tenant_id` via SecureConn; cross-tenant rows are invisible                                                                         |
@@ -146,8 +146,8 @@ See [PRD.md](./PRD.md) §1 "Overview" and §1.3 "Goals":
 | `cpt-cf-file-storage-fr-allowed-types-policy`          | `policy-engine` (P2): tenant/user-scoped allowed-MIME-type policy, resolved most-restrictive-wins and enforced on every storage-increasing write |
 | `cpt-cf-file-storage-fr-size-limits-policy`            | `policy-engine` (P2): tenant/user-scoped size-limit policy (with per-MIME overrides), same most-restrictive-wins resolution and enforcement points as the allowed-types policy |
 | `cpt-cf-file-storage-fr-metadata-limits`               | `policy-engine` (P2): per-file custom-metadata value-length and count limits, enforced at the service layer (P1 only applies coarse sanity limits) |
-| `cpt-cf-file-storage-fr-retention-policies`            | `cleanup-engine` (P2): tenant/user/file-scoped retention rules (age / inactivity / metadata, OR semantics) drive a background sweep that prunes whole expired files |
-| `cpt-cf-file-storage-fr-orphan-reconciliation`         | `cleanup-engine` (P2): the same background sweep also reclaims abandoned `pending` versions and reaps expired multipart sessions (`AbortMultipartUpload`, part + pending-version rows removed) past their `expires_at` grace window |
+| `cpt-cf-file-storage-fr-retention-policies`            | `cleanup-engine` (P2): tenant/user/file-scoped retention rules (age / inactivity / metadata, OR semantics) are meant to drive a cleanup job that prunes whole expired files (**not enforced yet**: no background worker runs it) |
+| `cpt-cf-file-storage-fr-orphan-reconciliation`         | `cleanup-engine` (P2): the same cleanup job (**not running yet**) is meant to reclaim abandoned `pending` versions and reaps expired multipart sessions (`AbortMultipartUpload`, part + pending-version rows removed) past their `expires_at` grace window |
 | `cpt-cf-file-storage-fr-backend-migration`             | `backend-migrator` (P2): relocates a non-versioned file's content between backends (cost-tier moves, deprecation, residency, rebalancing, DR) after a mode-aware verified copy, without rotating `file_id`/`version_id` |
 | `cpt-cf-file-storage-fr-upload-idempotency`            | Owner-scoped idempotency for uploads: an `idempotency_keys` table (P2) lets a retried `POST /files` with the same key replay the original ticket instead of creating a duplicate pending version |
 
@@ -535,9 +535,10 @@ callback), and **bind** a finalized version as the file's current `content_id` u
   returned, not as a separate call the sidecar makes later
 - **Finalize** (`status: pending → available`): invoked by the **sidecar**, over a token-authenticated HTTP `POST` —
   within a trusted network boundary, or over TLS/equivalent authenticated encryption when it crosses an untrusted
-  network — authorized solely by the same signed upload token (`fs-token`) that authorized the `PUT` — no FS SDK call, no
-  on-behalf-of delegation. Re-reads the blob from the backend and recomputes size/hash/MIME from the actual bytes
-  rather than trusting the sidecar's claim (defense-in-depth). With a `bind: "manual"` token (and for
+  network — authorized by the same signed upload token (`fs-token`) that authorized the `PUT` plus the mandatory
+  `x-fs-internal-token` credential — no FS SDK call, no on-behalf-of delegation. Trusts the sidecar-measured
+  size/hash, checks the size against the stored object (metadata), and validates MIME from a ranged prefix read
+  rather than re-reading the blob. With a `bind: "manual"` token (and for
   `POST /files/{id}/versions` uploads) it does **not** touch `content_id`; a `bind: "auto"` token (a new file's first
   content) makes it also bind the version in the same transaction, under a strict `content_id IS NULL`
   compare-and-set that can never replace existing content, and return the outcome to the sidecar for transparent
@@ -555,8 +556,8 @@ callback), and **bind** a finalized version as the file's current `content_id` u
 
 ##### Responsibility boundaries
 
-Does not stream bytes. Trusts a sidecar-reported `size`/`hash` claim only as a defense-in-depth cross-check — finalize
-independently re-reads and re-hashes the backend object rather than persisting the claim verbatim.
+Does not stream bytes. Trusts the sidecar-reported `size`/`hash` (the callback is authenticated by the mandatory internal credential) — finalize
+only cross-checks the size against the stored object's length and reads a MIME prefix; it does not re-read or re-hash the object.
 
 **Traces to**: the sidecar-callbacks and callback-internal-token requirements — see
 [§1.2 Architecture Drivers](#12-architecture-drivers)
@@ -679,15 +680,15 @@ this component's own surface is hashing only.
 ##### Responsibility scope
 
 - **SHA-256 hasher**: the sidecar's upload handlers hash incrementally as bytes stream to the backend
-  (`hash::Hasher`), and the control plane independently re-hashes a single-part upload on read-back at finalize
-  (defense-in-depth; see §4.2). Algorithm tag is `"SHA-256"`, the sole hard-coded algorithm
+  (`hash::Hasher`), and the control plane trusts the digest the sidecar reports on the authenticated finalize callback
+  (see §4.2). Algorithm tag is `"SHA-256"`, the sole hard-coded algorithm
   (`cpt-cf-file-storage-adr-content-hash-selection`)
 - **Magic-bytes / MIME validation runs on the control plane, not the sidecar.** There is no in-stream sidecar-side
   magic-byte tap and no in-sidecar `415` abort path. MIME validation (`infer`-crate-based sniffing,
   `infra::content::mime`) runs **on the control plane**, after the bytes have already fully landed: at single-part
   `finalize` and at multipart `complete` (which additionally issues one bounded ~8 KiB ranged read of the assembled
   object purely for this sniff — see §4.2). A mismatch there is rejected with `400`, and the version is never marked
-  `available`; any bytes already written to the backend become an orphan reclaimed by the cleanup sweep, not deleted
+  `available`; any bytes already written to the backend become an orphan (reclaimed once a cleanup job exists; none runs yet), not deleted
   synchronously
 - **No buffering of subsequent bytes** (sidecar hashing tap): once a chunk is hashed it passes through unchanged
 
@@ -906,7 +907,7 @@ intended decomposition. Several already have a dedicated FEATURE artifact under 
 |-------------------------------------------------------|-------|--------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
 | `multipart-coordinator`                               | P2    | Owns the multipart-upload lifecycle (initiate / part / complete / abort) and the per-part hash combiner — an offset-manifest composite (`root = sha256(manifest)`) built from the per-part digests at `complete`, no re-read (ADR-0006, see §4.2) | PRD requirement: resumable multipart upload (see [§1.2 Architecture Drivers](#12-architecture-drivers)) |
 | `policy-engine`                                       | P2    | Evaluates tenant/user policies (allowed types, size limits, custom-metadata limits)                                      | PRD requirements: allowed-types and size-limits policy (see [§1.2 Architecture Drivers](#12-architecture-drivers)) |
-| `cleanup-engine`                                      | P2    | Unified background process: whole-file retention pruning (age / inactivity / metadata) + orphan reconciliation; deletes files/version rows + backend objects via the sidecar; internal-only, audited. Per-version pruning of superseded (non-current) versions (≤ X versions / age T) is **P3** — deferred pending a versioning-policy schema | PRD requirements: retention policies and orphan reconciliation (see [§1.2 Architecture Drivers](#12-architecture-drivers)) |
+| `cleanup-engine`                                      | P2    | Unified cleanup engine (**not scheduled yet**: no background worker): whole-file retention pruning (age / inactivity / metadata) + orphan reconciliation; deletes files/version rows + backend objects via the sidecar; internal-only, audited. Per-version pruning of superseded (non-current) versions (≤ X versions / age T) is **P3** — deferred pending a versioning-policy schema | PRD requirements: retention policies and orphan reconciliation (see [§1.2 Architecture Drivers](#12-architecture-drivers)) |
 | `audit-publisher`                                     | P2    | Transactional outbox writer + async worker that drains to the platform audit sink                                        | PRD `cpt-cf-file-storage-fr-audit-trail`                                                       |
 | `event-publisher`                                     | P2    | EventBroker emitter for upload/update/delete events, gated by owner policy                                               | PRD `cpt-cf-file-storage-fr-file-events`                                                       |
 | `quota-adapter`                                       | P2    | Synchronous quota check before storage-consuming operations; usage reports asynchronously                                | PRD `cpt-cf-file-storage-fr-storage-quota`, `…fr-usage-reporting`                              |
@@ -1118,9 +1119,9 @@ sequenceDiagram
         SC-->>C: 413 (max_size, mid-stream) or 400 (exact_size / expected_hash mismatch)
     else success
         BA-->>SC: bytes_written, digest
-        SC->>CTL: POST .../versions/{version_id}/finalize {size, hash_hex}<br/>[fs-token; no app-token, no on-behalf-of]
-        CTL->>BA: re-read the blob, recompute size/hash, and sniff a MIME prefix (never trusts the sidecar's claim)
-        alt read-back mismatch, MIME mismatch (400), or no object at backend_path
+        SC->>CTL: POST .../versions/{version_id}/finalize {size, hash_hex}<br/>[fs-token + x-fs-internal-token; no app-token, no on-behalf-of]
+        CTL->>BA: check the object's size (metadata) and read a ranged MIME prefix (trusts the sidecar's size/hash; no re-read)
+        alt size mismatch, MIME mismatch (400), or no object at backend_path
             CTL-->>SC: 4xx (validation failure)
             SC-->>C: 502 Bad Gateway
         else verified
@@ -1476,7 +1477,7 @@ in P2 (the metadata-limits policy, §1.2); in P1 only sanity limits apply
 
 | Table                              | Phase | Purpose                                                                                  | Forward reference                                                |
 |------------------------------------|-------|------------------------------------------------------------------------------------------|------------------------------------------------------------------|
-| `multipart_uploads`                | P2    | In-flight multipart sessions: `upload_id`, `file_id`, lease state, `auto_bind` flag, and the session's own `backend_id`/`backend_path` (recorded once at initiate from the pending version, so the cleanup sweep can resolve the target backend/object even once the `file_versions` row is already gone) | resumable multipart upload (§1.2)                        |
+| `multipart_uploads`                | P2    | In-flight multipart sessions: `upload_id`, `file_id`, lease state, `auto_bind` flag, and the session's own `backend_id`/`backend_path` (recorded once at initiate from the pending version, so a cleanup job can resolve the target backend/object even once the `file_versions` row is already gone) | resumable multipart upload (§1.2)                        |
 | `multipart_upload_parts`           | P2    | One row per uploaded part: `backend_etag`/offset, `size`, `part_hash` (SHA-256 of the part's bytes, computed on-the-fly; folded into the offset-manifest composite at `complete`, no re-read — ADR-0006, shipped) | resumable multipart upload (§1.2)                        |
 | `idempotency_keys`                 | P2    | Owner-scoped idempotency for uploads                                                      | upload idempotency (§1.2)                      |
 | `audit_outbox`                     | P2    | Transactional-outbox rows drained by `audit-publisher` to the audit sink                 | `cpt-cf-file-storage-fr-audit-trail`                             |
@@ -1628,10 +1629,10 @@ The hash and ETag share a derivation path but mean different things and live in 
 
 **Hash computation (on upload, ADR-0006).** For a **single-part** upload, the sidecar's upload handler hashes
 the stream incrementally (`hash::Hasher`) as it writes to the backend and reports the digest to the control plane in
-the **finalize** callback (not `bind`); the control plane independently **re-reads the whole backend object**
-(`read_back_and_hash_streaming`, streamed, never fully buffered) and recomputes the same digest as a defense-in-depth
-check before persisting it in `file_versions.hash_value` with `hash_mode = 'whole-sha256'` and no manifest row. This
-single-part read-back was **not** eliminated by ADR-0006 — only the multipart full-object re-read was.
+the **finalize** callback (not `bind`); the control plane **trusts** that digest (the callback is authenticated by the
+mandatory internal credential) and does not re-read the object: it checks the claimed size against the stored
+object's length via backend metadata, then persists the digest in `file_versions.hash_value` with
+`hash_mode = 'whole-sha256'` and no manifest row.
 
 For a **multipart** upload, `complete_multipart` never re-reads or re-concatenates the assembled object to compute a
 hash: it folds the per-part `(offset, sha256(part_bytes))` pairs already collected during upload into a canonical
@@ -1646,11 +1647,11 @@ that part's streaming digest is already `sha256(whole object bytes)`, so `comple
 now hashes identically whether it arrived as a single-shot PUT or a one-part multipart session. Only plans of two or
 more parts produce the composite mode.
 
-**Per-part hash trust (multipart only).** Unlike single-part finalize's read-back-and-rehash, a part's `sha256` is
+**Per-part hash trust.** As with the single-part digest, a part's `sha256` is
 never independently re-verified by the control plane — the sidecar computes it and reports it over the
 token-authenticated `report-part` callback, and the control plane simply persists it (only the part's claimed *size*
 is cross-checked against the token's `multipart.size` claim). This trust rests on the same signed per-part token
-that authorized the part's upload, optionally hardened by the interim gear-local shared secret
+that authorized the part's upload, plus the mandatory interim gear-local shared secret
 (`FS_SIDECAR_INTERNAL_TOKEN` / `FileStorageConfig::finalize_internal_secret`, `x-fs-internal-token` header) that
 authenticates the caller as the sidecar itself, not merely a holder of a leaked signed URL (§4.5).
 
@@ -1661,9 +1662,9 @@ both modes (ADR-0006 defines the two hash modes; ADR-0002 covers the algorithm-s
 
 | Backend              | Multipart support                                                                                                                                 | Hash mode                                                                                                       |
 |----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-| `local-filesystem`   | **No** — `initiate_multipart`/`upload_part_stream`/`complete_multipart`/`abort_multipart` all inherit the trait's default `Err(multipart_not_supported)` | whole-object SHA-256 only (single-part, with the read-back re-hash above)                                       |
-| `s3-compatible` (S3) | Yes (native `CreateMultipartUpload`/`PutPart`/`CompleteMultipartUpload`)                                                                           | whole-object SHA-256 (single-part, read-back); multipart-composite-SHA-256 (ADR-0006) — no full re-read, only an 8 KiB ranged `GetObject` for MIME sniffing |
-| in-memory            | Yes (test/dev backend)                                                                                                                              | whole-object SHA-256 (single-part, read-back); multipart-composite-SHA-256 (ADR-0006) — no full re-concat for hashing, only an 8 KiB slice for MIME sniffing |
+| `local-filesystem`   | **No** — `initiate_multipart`/`upload_part_stream`/`complete_multipart`/`abort_multipart` all inherit the trait's default `Err(multipart_not_supported)` | whole-object SHA-256 only (single-part, hash reported by the sidecar)                                       |
+| `s3-compatible` (S3) | Yes (native `CreateMultipartUpload`/`PutPart`/`CompleteMultipartUpload`)                                                                           | whole-object SHA-256 (single-part, sidecar-reported); multipart-composite-SHA-256 (ADR-0006) — no full re-read, only an 8 KiB ranged `GetObject` for MIME sniffing |
+| in-memory            | Yes (test/dev backend)                                                                                                                              | whole-object SHA-256 (single-part, sidecar-reported); multipart-composite-SHA-256 (ADR-0006) — no full re-concat for hashing, only an 8 KiB slice for MIME sniffing |
 
 **ETag derivation.** The ETag is opaque and content-derived from the current version pointer:
 
@@ -1723,7 +1724,7 @@ Concurrency caps:
 | `cpt-cf-file-storage-nfr-metadata-latency`      | Designed              | Single-row Postgres lookup; expected p95 well within budget under target load                                                                        |
 | `cpt-cf-file-storage-nfr-transfer-latency`      | Designed              | Sidecar streams end-to-end; no full-file buffering; range translated to backend-native where supported. The extra control round-trip (presign) is a small metadata call, off the byte path |
 | `cpt-cf-file-storage-nfr-url-availability`      | Designed              | File identity (`file_id`) is stable for the file's lifetime; access is via re-presignable signed URLs; deleted files return `404`                    |
-| `cpt-cf-file-storage-nfr-durability`            | Designed              | Finalize-then-bind model: the version is `pending` at pre-register and flips to `available` only after a successful sidecar streaming write (`publish_exclusive`) + **finalize** (the sidecar's token-authenticated callback, which re-reads the blob from the backend and independently verifies size/hash before persisting) — so `content_id` never points at missing or unverified bytes once the pointer is swapped (inline by finalize's first-content CAS for `bind: "auto"`, or by a later client `bind`). A `pending` version whose finalize never completes, plus its blob, is an orphan: the sidecar best-effort deletes the partial object on a stream/size-constraint error path, and the P2 cleanup engine sweeps the residue (hard sidecar crash between the streamed write and finalize). The `files` row never points at a non-`available` version |
+| `cpt-cf-file-storage-nfr-durability`            | Designed              | Finalize-then-bind model: the version is `pending` at pre-register and flips to `available` only after a successful sidecar streaming write (`publish_exclusive`) + **finalize** (the sidecar's token-authenticated callback, which re-reads the blob from the backend and independently verifies size/hash before persisting) — so `content_id` never points at missing or unverified bytes once the pointer is swapped (inline by finalize's first-content CAS for `bind: "auto"`, or by a later client `bind`). A `pending` version whose finalize never completes, plus its blob, is an orphan: the sidecar best-effort deletes the partial object on a stream/size-constraint error path, and the P2 cleanup engine is meant to sweep the residue once scheduled (not yet; hard sidecar crash between the streamed write and finalize). The `files` row never points at a non-`available` version |
 | `cpt-cf-file-storage-nfr-scalability`           | Designed              | Stateless request path on both planes; shared metadata DB; the control plane is bandwidth-light, the sidecar scales independently on bandwidth; streaming I/O bounds per-request CPU and memory |
 | `cpt-cf-file-storage-nfr-bandwidth`             | Designed              | Per-**sidecar**-instance ingress+egress budget (≥ 2.5 GiB/s combined on 25 GbE) sized so the concurrency target is bandwidth- not CPU-bound; sidecar capacity scales horizontally with stateless replicas; conditional re-reads offloaded to API-Gateway/CDN keyed on the content-only `ETag` the sidecar emits. Models the cost accepted by `cpt-cf-file-storage-adr-sidecar-data-plane`, confined to the sidecar |
 | `cpt-cf-file-storage-nfr-audit-completeness`    | Implemented (write side) | Audit rows are written in the same transaction as each write — every audited mutation and its `audit_outbox` insert commit or roll back together, so there is no window where a write succeeds without its audit row. Not yet covered: a drain/relay from the outbox to a downstream audit sink, and read-path (download/metadata-query) audit logging, both P2/P3 (see the Audit Trail and Read Audit Logging requirements in PRD.md) |
@@ -1734,7 +1735,7 @@ The NFR table above traces each platform NFR to its design response. Mapped onto
 | Vector | Design mechanisms | Observable signals |
 | --- | --- | --- |
 | **Efficiency** | Control/data-plane split (ADR-0003) keeps content off the control plane; streaming without buffering on both upload and download (§4.3); default `bind: "auto"` collapses single-part upload to 2 requests, `N+2` for multipart; in-process SDK trait (`sdk-facade`) avoids a network hop for consuming Gears; storage backends selected by static config, no rebuild (Backend Configuration Source, PRD.md §5.8) | `record_ingress_bytes`, `record_egress_bytes` — bytes actually moved through the sidecar, the proxy for transfer/egress cost |
-| **Reliability** | Finalize-then-bind: a version is `pending` until the sidecar's token-authenticated finalize independently re-verifies size/hash and flips it to `available`; multipart `complete` is serialized under a completion lease with idempotent replay; `DELETE` locks the `files` row (`SELECT ... FOR UPDATE`) then re-reads its versions before removing them, closing a concurrent-presign race; transient sidecar/backend faults surface as `503` + `Retry-After` rather than a hard failure; the P2 cleanup-engine sweep reclaims orphans/abandoned sessions past their `expires_at` grace window; signing-key rotation is zero-outage via an accepted set of previous public keys | `record_operation(op, result)` — success/failure per operation, the failed-workflow-rate proxy; `record_backend_error(backend_id, op)`; `record_sweep_result(...)` — cleanup/orphan-reconciliation outcomes |
+| **Reliability** | Finalize-then-bind: a version is `pending` until the sidecar's token-authenticated finalize verifies the reported size against the stored object and flips it to `available`; multipart `complete` is serialized under a completion lease with idempotent replay; `DELETE` locks the `files` row (`SELECT ... FOR UPDATE`) then re-reads its versions before removing them, closing a concurrent-presign race; transient sidecar/backend faults surface as `503` + `Retry-After` rather than a hard failure; the P2 cleanup engine (not scheduled yet) is meant to reclaim orphans/abandoned sessions past their `expires_at` grace window; signing-key rotation is zero-outage via an accepted set of previous public keys | `record_operation(op, result)` — success/failure per operation, the failed-workflow-rate proxy; `record_backend_error(backend_id, op)`; `record_sweep_result(...)` — cleanup/orphan-reconciliation outcomes |
 | **Performance** | Streaming I/O end to end (no full-file buffering) on both planes; keyset cursor pagination, navigable in either direction (`created_at DESC, file_id DESC`), keeps list latency independent of page depth; covering/partial Postgres indexes back the metadata-latency and cleanup-sweep queries; `Range` translated to backend-native range where the backend supports it | `record_request(route, method, status, latency_ms)` — the per-route latency histogram behind the p95 metadata/transfer NFRs |
 | **Security** | Tenant-scoped authz via `SecureConn`/`SecurityContext.tenant_id` makes a cross-tenant row invisible before it could even be evaluated; `ADMIN_POLICY` scope gates creating/listing files under any owner other than the caller's own; content access is authorized only by a control-plane-minted, sidecar-verified Ed25519-signed token (§4.5); the callback second-factor secret (`x-fs-internal-token`) is held as a non-logged secret and redacted wherever config is dumped | `record_quota_denied(op)`; `403` statuses surfaced through `record_request(..., status, ...)` |
 | **Versatility** | Pluggable `StorageBackend` trait with capability discovery (`local-filesystem`, in-memory, `s3-compatible`); multipart upload and `Range` reads as backend-capability-gated features; tenant/user policy and retention rules (P2 `policy-engine`/`cleanup-engine`) configured, not coded; object placement is an opt-in `StoragePlacementResolver` plugin seam (ADR-0007) rather than a hard-coded convention | no dedicated signal yet |
@@ -1749,7 +1750,7 @@ methods: `record_operation`, `record_backend_error`, `record_quota_denied`, `rec
 | Vector | Framework metric | Design mechanism or signal |
 |---|---|---|
 | Efficiency | Time from approved PRD to production | Platform delivery process; the gear ships docs, compatible extensions and behaviour changes as separate reviewable changes |
-| Efficiency | TCO to build and operate a feature, Gear, or product | Platform cost model; gear cost drivers bounded by the control/data-plane split, streaming and the sweep time budget |
+| Efficiency | TCO to build and operate a feature, Gear, or product | Platform cost model; gear cost drivers bounded by the control/data-plane split, streaming |
 | Efficiency | Lead time for change | One additive migration per change, upgrade and rollback in `operations.md` |
 | Efficiency | Cost per delivered feature | Platform delivery metrics |
 | Efficiency | Infrastructure cost per transaction/workflow | `record_ingress_bytes`, `record_egress_bytes`; fixed number of control-plane calls per upload (2, or N + 2 for multipart) |
@@ -1820,7 +1821,7 @@ response-header set" claim beyond the specific `content_type`/`etag` fields abov
 The sidecar additionally checks the **HTTP method matches the `op` claim**, so a download token cannot drive an upload (or vice
 versa). **Not in the token:** the `Range` header
 (varies per request — free for random access), conditional headers, and the `PUT` body (byte integrity is verified by
-the size/hash claims during the stream and by the read-back hash check at finalize). Consequence: a `PUT` token can be replayed with
+the size/hash the sidecar measures during the stream and the size check at finalize). Consequence: a `PUT` token can be replayed with
 different bytes until `exp` → if the backend path has not been published yet, the replay lands like an ordinary write and an
 abandoned one becomes an orphan version/blob (swept by the P2 cleanup engine); if the path **has** already been published, the
 backend's publish is create-exclusive (`StorageBackend::publish_exclusive`) and rejects the replay with `409` —
@@ -1984,7 +1985,7 @@ mediated by the LMS.
    sidecar→control pre-register call — counting bytes against `max_size` and hashing incrementally; it does not
    sniff MIME/magic bytes in-stream (that happens on the control plane at finalize).
 6. At end-of-stream the sidecar calls the control plane's token-authenticated **finalize** callback with
-   `{size, hash_hex}`. The control plane re-reads the object, recomputes size/hash, sniffs its magic bytes against
+   `{size, hash_hex}`. The control plane checks the reported size against the stored object's length, sniffs a ranged prefix's magic bytes against
    the declared MIME, and flips the version `pending → available`. Because the token carries `bind_on_finalize`,
    the same transaction also binds the version: a compare-and-set that sets `content_id := version_id` only if the
    file still has no content (`content_id IS NULL`), so this path can never replace existing content. The

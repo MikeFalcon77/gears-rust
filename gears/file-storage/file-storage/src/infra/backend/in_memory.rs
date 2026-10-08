@@ -12,6 +12,8 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use uuid::Uuid;
 
+use file_storage_sdk::ByteRange;
+
 use crate::domain::error::DomainError;
 use crate::infra::content::hash;
 use crate::infra::content::hash_mode::Manifest;
@@ -63,7 +65,7 @@ impl StorageBackend for InMemoryBackend {
     fn capabilities(&self) -> BackendCapabilities {
         BackendCapabilities {
             multipart_native: true,
-            range_native: false,
+            range_native: true,
             // Intentionally left on the `BackendCapabilities::default()`
             // value of `false`: content lives only in process memory and is
             // lost on restart/crash, so `migrate_backend` must treat this as
@@ -120,6 +122,23 @@ impl StorageBackend for InMemoryBackend {
     ) -> Result<BoxStream<'_, std::io::Result<Bytes>>, DomainError> {
         let bytes = self.get(path).await?;
         Ok(Box::pin(futures::stream::once(async move { Ok(bytes) })))
+    }
+
+    async fn get_range(&self, path: &str, range: ByteRange) -> Result<Bytes, DomainError> {
+        let full = self.get(path).await?;
+        let total = full.len() as u64;
+        match range.resolve(total) {
+            Some((start, end)) => {
+                let s = usize::try_from(start).unwrap_or(usize::MAX);
+                let e = usize::try_from(end).unwrap_or(usize::MAX);
+                Ok(full.slice(s..=e.min(full.len().saturating_sub(1))))
+            }
+            None => Err(DomainError::validation("range", "unsatisfiable byte range")),
+        }
+    }
+
+    async fn size(&self, path: &str) -> Result<u64, DomainError> {
+        Ok(self.get(path).await?.len() as u64)
     }
 
     async fn delete(&self, path: &str) -> Result<(), DomainError> {

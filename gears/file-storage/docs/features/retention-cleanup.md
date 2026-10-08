@@ -28,7 +28,7 @@ Updated:  2026-07-08 by Constructor Tech
   - [Multipart Session (owned by multipart-coordinator, driven here on a timer)](#multipart-session-owned-by-multipart-coordinator-driven-here-on-a-timer)
 - [5. Definitions of Done](#5-definitions-of-done)
   - [Retention Rule Domain Types and Administration Endpoints](#retention-rule-domain-types-and-administration-endpoints)
-  - [Cleanup Engine and Background Sweep Scheduling](#cleanup-engine-and-background-sweep-scheduling)
+  - [Cleanup Engine and Background Sweep Scheduling](#cleanup-engine-scheduling-not-implemented)
   - [Live-Multipart-Session Guard](#live-multipart-session-guard)
   - [Semantic Validation on Write](#semantic-validation-on-write)
 - [6. Acceptance Criteria](#6-acceptance-criteria)
@@ -41,7 +41,13 @@ Updated:  2026-07-08 by Constructor Tech
 
 ### 1.1 Overview
 
-Two related P2 capabilities sharing one background engine (the cleanup engine's periodic sweep):
+> **Status: not enforced yet.** The gear runs **no background worker**: nothing calls the cleanup engine
+> periodically. Retention rules can be stored but are not enforced, and abandoned `pending` versions, expired
+> multipart sessions and expired idempotency keys are not cleaned up until a separate cleanup job exists. The
+> engine and its algorithms below are kept as the contract for that job; the timer-based wording (sweep interval,
+> background loop, ticks) describes how the engine behaves when invoked.
+
+Two related P2 capabilities sharing one engine (the cleanup engine's sweep, not scheduled yet):
 (1) **retention policies** (`cpt-cf-file-storage-fr-retention-policies`) — tenant/user/file-scoped rules that
 auto-expire files by age, inactivity, or a custom-metadata match; and (2) **orphan reconciliation**
 (`cpt-cf-file-storage-fr-orphan-reconciliation`) — reclaiming `pending` version rows (and, transitively, permanently
@@ -52,8 +58,8 @@ control plane died between committing the file row and inserting its pending ver
 initiate-failure compensation itself failed; see [Sweep Versionless
 Files](#sweep-versionless-files-abandoned-multipart-create-orphans)). The sweep also purges expired
 `idempotency_keys` rows (a
-housekeeping task riding the same cycle, not part of either named requirement). One background task per
-control-plane instance runs the full sweep on a fixed interval; there is no cross-instance coordination in P2 — see
+housekeeping task riding the same cycle, not part of either named requirement). Once a cleanup job exists it runs the full sweep per
+control-plane instance; there is no cross-instance coordination in P2 — see
 §4.
 
 ### 1.2 Purpose
@@ -206,14 +212,14 @@ documented as a process in §3 instead.
 
 ## 3. Processes / Business Logic (CDSL)
 
-Internal system functions with no direct actor interaction; the background sweep loop is the only caller.
+Internal system functions with no direct actor interaction; the (future) cleanup job is the only caller.
 
 ### Run Sweep Cycle
 
 - [x] `p1` - **ID**: `cpt-cf-file-storage-algo-run-sweep`
 
 **Input**: none (reads current time and the `CleanupConfig.orphan_grace_secs` and
-`sweep_time_budget_secs` knobs)
+time-budget knobs)
 
 **Output**: `SweepResult { abandoned_pending_deleted, abandoned_files_deleted, expired_multipart_aborted,
 retention_expired_deleted, idempotency_keys_deleted, budget_exhausted, elapsed_ms }`
@@ -234,7 +240,7 @@ retention_expired_deleted, idempotency_keys_deleted, budget_exhausted, elapsed_m
 5. [x] - `p1` - Repeat steps 1-4 as further passes, in the same order, each pass running one more batch per
    not-yet-exhausted step — a step is exhausted once its batch comes back shorter than its page size or its
    query/delete errors — until either every step is exhausted or the tick's time budget
-   (`sweep_time_budget_secs`, default 900s / 15 minutes) runs out. The first pass always completes in full
+   (a fixed time budget, 15 minutes) runs out. The first pass always completes in full
    regardless of the budget, so a misconfigured budget can never make one tick do less than the historical
    single-batch-per-call behavior; the budget is only checked before a later pass's batch -
    `inst-sweep-passes`
@@ -249,7 +255,7 @@ retention_expired_deleted, idempotency_keys_deleted, budget_exhausted, elapsed_m
 > each: `RETENTION_SWEEP_BATCH`, `ABANDONED_PENDING_SWEEP_BATCH`, `VERSIONLESS_SWEEP_BATCH`,
 > `EXPIRED_MULTIPART_SWEEP_BATCH`, `EXPIRED_IDEMPOTENCY_SWEEP_BATCH`) — none of them is a literal unbounded
 > query/statement with no `LIMIT`. Within one tick, every step keeps taking another batch — interleaved with the
-> other steps, in the fixed step order above — until it is exhausted or the tick's `sweep_time_budget_secs` budget
+> other steps, in the fixed step order above — until it is exhausted or the tick's time budget
 > runs out; an unfinished step's remaining work carries over rather than being dropped. The abandoned-pending,
 > versionless-files, and expired-multipart steps each keep a keyset cursor for this purpose that is local to one
 > tick: a candidate a batch could not actually reclaim (a still-active multipart session, a transient per-row
@@ -360,7 +366,7 @@ semantics as [Sweep Abandoned Pending Versions](#sweep-abandoned-pending-version
 
 Unlike the other three sweep steps, this step's keyset cursor (`files.file_id`) is **not** tick-local: it is kept
 on the `CleanupEngine` itself and survives across ticks, because a full table scan can legitimately take longer
-than one `sweep_time_budget_secs` budget on a large deployment. `all_rules` is loaded once per tick by the caller
+than one time budget on a large deployment. `all_rules` is loaded once per tick by the caller
 ([Run Sweep Cycle](#run-sweep-cycle)) and handed to every page unchanged, since the rule set is small relative to
 the files.
 
@@ -417,7 +423,7 @@ multipart-coordinator.md. This feature is the sole driver of that state machine'
 Sessions](#sweep-expired-multipart-sessions); it introduces no new state values.
 
 **No cross-instance coordination in P2.** The sweep runs independently, unsynchronized, on every control-plane
-instance on its own timer. This is deliberately safe rather than merely "not yet a bug": every mutation the sweep
+instance when invoked. This is deliberately safe rather than merely "not yet a bug": every mutation the sweep
 performs is a CAS or a status-guarded delete, so a concurrent redundant sweep on the same row gets `Ok(false)`/zero
 rows affected rather than corrupting state or double-reporting usage. Leader election / distributed locking to
 eliminate the redundant work (not the small risk of incorrectness, since there is none) is deferred to P3.
@@ -445,14 +451,13 @@ not-found case for deleting a missing rule.
   `DELETE /api/file-storage/v1/retention-rules/{rule_id}`
 - DB Table: `retention_rules`
 
-### Cleanup Engine and Background Sweep Scheduling
+### Cleanup Engine (scheduling not implemented)
 
 - [x] `p1` - **ID**: `cpt-cf-file-storage-dod-cleanup-engine`
 
 The cleanup engine's sweep entry point implements all four steps in [Run Sweep
-Cycle](#run-sweep-cycle). The gear spawns a background loop on `sweep_interval_secs`, gated by
-`enable_background_sweep` (default enabled; test/dev harnesses that need deterministic behavior set it `false`
-and call the sweep directly), and exports the tallied results as metrics counters at the point they are logged.
+Cycle](#run-sweep-cycle). The gear does **not** schedule it: there is no background loop and no `sweep_interval_secs`/`enable_background_sweep`
+configuration. A separate cleanup job is expected to call it.
 
 **Implements**:
 - `cpt-cf-file-storage-algo-run-sweep`
@@ -547,17 +552,17 @@ from the guard.
 - [x] Owners can define retention rules at tenant, user, or file scope, matching on age, inactivity, or a
   custom-metadata key/value, with OR semantics across multiple criteria on one rule
   (`cpt-cf-file-storage-fr-retention-policies`)
-- [x] A file matched by any applicable retention rule is deleted (content + metadata + custom metadata, cascading)
-  by the background sweep, with an audit record (`retention_delete`) and a `file.deleted` event on the same
+- [ ] A file matched by any applicable retention rule is deleted (content + metadata + custom metadata, cascading)
+  by the cleanup sweep (**not enforced yet**: no background worker runs it), with an audit record (`retention_delete`) and a `file.deleted` event on the same
   transactional-outbox path user-initiated deletes use
 - [x] A retention rule that would match every file immediately (`max_age_days`/`inactivity_days == 0`) or could
   never match any file (all criteria absent) or could never resolve a target (`user`/`file` scope with no target) is
   rejected at write time, not silently accepted
-- [x] A `pending` version row past `orphan_grace_secs` with no finalize/bind is deleted, along with its backend
+- [ ] (**Not enforced yet**: no background worker.) A `pending` version row past the orphan grace period with no finalize/bind is deleted, along with its backend
   blob (best-effort), and an `orphan_reconcile` audit row is written (`cpt-cf-file-storage-fr-orphan-reconciliation`)
 - [x] A file left with zero versions and `content_id IS NULL` after its last pending version is reclaimed is itself
   deleted (not left as a permanent, unreachable-forever `files` row), with a `file.deleted` event
-- [x] A `files` row that never had any version at all — a multipart `POST /files` whose control plane crashed
+- [ ] (**Not enforced yet**: no background worker.) A `files` row that never had any version at all — a multipart `POST /files` whose control plane crashed
   between committing the file row and inserting its pending version, or whose synchronous initiate-failure
   compensation itself failed — is also reclaimed, once it ages past `orphan_grace_secs`, by step 1's second phase
   (`cpt-cf-file-storage-algo-sweep-versionless-files`); it does not require a pending version to have existed and
@@ -592,7 +597,7 @@ from the guard.
 - [ ] Sweep-driven usage reports (bytes/file-count debits on reclaim/expiry) are wired end-to-end in code but are a
   no-op in every real deployment today, since no `UsageReporter` is configured (`cpt-cf-file-storage-fr-usage-
   reporting` is a separate, not-yet-connected requirement — see the caveat under [Cleanup Engine and Background
-  Sweep Scheduling](#cleanup-engine-and-background-sweep-scheduling))
+  Sweep Scheduling](#cleanup-engine-scheduling-not-implemented))
 - [ ] The retention-expiry **sweep's own internal read** (`CleanupStore::list_all_retention_rules`, distinct from the
   `GET /retention-rules` REST listing below) still loads every stored retention rule across every tenant and scope
   in one unpaginated read before scanning files (only the file scan itself is keyset-paginated, step 2 above). Safe

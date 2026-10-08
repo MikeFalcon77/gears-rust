@@ -175,57 +175,38 @@ emergency revocation is the platform auth module's token revocation, not the URL
   (version) write itself; that remains a client-issued, user-authorized control-plane request
   (`cpt-cf-file-storage-fr-authorization`).
 * **Trust model update (P2 remediation 0.1, remaining half).** The `fs-token` alone is
-  client-visible: it is handed back to the client in plaintext inside `upload_url` (minted by
-  `sign_url`), so a client could always call `finalize`/`report-part` itself at a time of its
-  choosing, replay reports, or otherwise occupy the trust position the callback was designed for the
-  sidecar alone. The data-integrity half of this was already closed independently (the control plane
-  re-derives `size`/`hash`/`mime_type` from a real streaming read-back of the backend bytes, so a
-  forged claim cannot corrupt stored metadata). What remained was *who* is allowed to call these two routes at all. The chosen
+  client-visible: it is handed back to the client in plaintext inside `upload_url`, so a client could
+  always call `finalize`/`report-part` itself at a time of its choosing, replay reports, or otherwise
+  occupy the trust position the callback was designed for the sidecar alone. These two routes are
+  therefore authorized by a second factor, and finalize **trusts** what the sidecar reports: the
+  control plane no longer re-reads the object to recompute size and hash. The sidecar measures the
+  size and SHA-256 while streaming the `PUT`; finalize checks the claimed size against the stored
+  object's length (backend metadata) and reads only a bounded prefix for MIME validation. The chosen
   mechanism is an **interim gear-local shared secret** (not the platform's
   `toolkit-security::internal_auth` profiles, which are not yet deployable in this gear — Profile 1
   is in-process-only trust, useless across the sidecar/control-plane process boundary; Profile 2
   (`BootstrapToken`) is struct-only with validation deferred; Profile 3 needs K8s `TokenReview`
-  wiring this gear doesn't have): `FileStorageConfig::finalize_internal_secret` (optional) plus
-  `require_finalize_internal_secret` (fail-fast startup guard, mirroring `require_signing_key_seed`).
-  When configured, `finalize`/`report-part` additionally require a `x-fs-internal-token` header
-  matching the configured secret (constant-time comparison via `ring::constant_time`,
-  `handlers::FinalizeAuth`), checked *after* `fs-token` verification; a missing/mismatched header is
-  a `403`. Like the `fs-token` callback authorization above, this header is token-authenticated HTTP
-  within the deployment's trusted network boundary; it too **MUST** travel over TLS (or equivalent
-  authenticated encryption) when the callback path crosses an untrusted or shared network, since the
-  shared secret alone gives the header no confidentiality in transit. The sidecar sends this header (from `FS_SIDECAR_INTERNAL_TOKEN`) on both callbacks when
-  configured; an unset secret on the control plane preserves pre-0.1 behavior (token-only trust),
-  while a control plane that has the secret set answers `403` to any sidecar not yet sending the
-  header, so **the rollout order matters**: (1) redeploy every sidecar talking to the control plane with the matching
-  `FS_SIDECAR_INTERNAL_TOKEN` first; (2) only then set `finalize_internal_secret` on the control
-  plane together with `require_finalize_internal_secret: true` (a configured secret rejects any
-  caller lacking the header regardless of the flag, closing the client-driven-finalize gap).
-  Configuring the secret on the control plane before every sidecar carries the token bricks uploads
-  from any not-yet-redeployed sidecar. This is explicitly a stop-gap: once the platform's `internal_auth`
-  profiles are deployable here, `handlers::FinalizeAuth`'s comparator should be swapped for
-  `InternalAuthenticator` and this shared secret retired.
-* **Known gap: multipart part-hash trust.** The data-integrity claim above
-  ("a forged claim cannot corrupt stored metadata") only holds for the
-  **single-shot** `PUT`/finalize path, where `read_back_and_hash_streaming`
-  re-derives `size`/`hash`/`mime_type` from the real backend bytes. For
-  **multipart** uploads there is no equivalent re-read: `report_part`
-  persists the caller-supplied part hash after only a length/size check (not
-  a re-hash of the bytes actually written), and `complete_multipart_upload`
-  builds the composite `hash_value`/manifest exclusively from those stored
-  per-part hashes (ADR-0006) — the assembled object itself is never re-hashed
-  end to end. Since the `fs-token` authorizing a part write is client-visible
-  (the same exposure this bullet's trust-model update addresses) and the
-  `x-fs-internal-token` gate is off by default
-  (`finalize_internal_secret: None`), a caller holding a valid part
-  token could in principle report a hash that does not match the bytes it
-  streamed, corrupting the composite hash without being caught by any
-  read-back. Mitigations available today: enable `finalize_internal_secret` +
-  `require_finalize_internal_secret` so only the sidecar (not an arbitrary
-  token holder) can reach `report_part`/`finalize` at all — this gate already
-  covers `report_part`, not just `finalize`, both checked the same way. A durable fix (deriving the part
-  hash from a sidecar-side value the control plane can independently trust,
-  or re-hashing the assembled object) is future work, out of scope for this
-  remediation. A related gap in the same release gate is now closed in code for every shipping
+  wiring this gear doesn't have): `FileStorageConfig::finalize_internal_secret`, which is
+  **mandatory** (gear init fails without it). `finalize`/`report-part` require a `x-fs-internal-token`
+  header matching the configured secret (constant-time comparison), checked *after* `fs-token`
+  verification; a missing/mismatched header is a `403`. Like the `fs-token` callback authorization
+  above, this header is token-authenticated HTTP within the deployment's trusted network boundary; it
+  too **MUST** travel over TLS (or equivalent authenticated encryption) when the callback path crosses
+  an untrusted or shared network, since the shared secret alone gives the header no confidentiality in
+  transit. The sidecar sends this header (from `FS_SIDECAR_INTERNAL_TOKEN`, which is also mandatory:
+  the sidecar refuses to start without it) on both callbacks. Both sides must be deployed with the
+  same value. This is explicitly a stop-gap: once the platform's `internal_auth` profiles are
+  deployable here, the comparator should be swapped for `InternalAuthenticator` and this shared
+  secret retired.
+* **Known gap: part-hash and size trust.** Because the callbacks are trusted rather than
+  re-verified, the stored hash of a single-shot upload and the per-part hashes of a multipart upload
+  are whatever the authenticated sidecar reported; `report_part` persists the reported part hash after
+  only a length/size check, and `complete_multipart_upload` builds the composite `hash_value`/manifest
+  exclusively from those stored per-part hashes (ADR-0006) — the object itself is never re-hashed end
+  to end. A caller holding a valid part token but **not** the internal secret cannot reach
+  `report_part`/`finalize` at all, so the exposure is limited to a compromised or buggy sidecar (or a
+  leaked internal secret). A durable fix (an independently trusted hash, or periodic re-hashing by a
+  separate verification job) is future work, out of scope for this remediation. A related gap in the same release gate is now closed in code for every shipping
   backend: `StorageBackend::publish_exclusive` has **no default trait implementation** at all (a
   backend-agnostic `exists`-then-write fallback would necessarily be the same non-atomic TOCTOU this
   paragraph closes, so the trait does not offer one) — every backend implements its own atomic write.

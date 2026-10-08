@@ -74,33 +74,6 @@ pub struct FileStorageConfig {
     #[serde(default = "default_idempotency_ttl_secs")]
     pub idempotency_ttl_secs: u64,
 
-    /// Grace period (seconds) before a pending version or abandoned multipart
-    /// session is eligible for orphan reconciliation.
-    /// Default: 3600 (1 hour).
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
-    #[serde(default = "default_orphan_grace_secs")]
-    pub orphan_grace_secs: u64,
-
-    /// How often (seconds) the background cleanup sweep fires.
-    /// Default: 3600 (1 hour).
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
-    /// @cpt-cf-file-storage-fr-retention-policies
-    #[serde(default = "default_sweep_interval_secs")]
-    pub sweep_interval_secs: u64,
-
-    /// When `true`, the background cleanup sweep is started at gear init.
-    /// **Defaults to `true`** — any deployment that doesn't say otherwise
-    /// gets orphan/retention sweeping on out of the box. Test/dev harnesses
-    /// that construct a `FileStorageConfig` directly (not via YAML) and need
-    /// deterministic behavior must explicitly set this to `false`.
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
-    /// @cpt-cf-file-storage-fr-retention-policies
-    #[serde(default = "default_enable_background_sweep")]
-    pub enable_background_sweep: bool,
-
     /// When `true`, an additional non-durable `memory` backend is registered
     /// alongside the default `local-fs` backend. **Must be `false` by
     /// default** — the in-memory backend loses all content on restart, so it
@@ -137,10 +110,11 @@ pub struct FileStorageConfig {
     pub default_backend_id: Option<String>,
 
     /// Interim gear-local shared secret (P2 0.1 remaining) the s2s
-    /// finalize/report-part callback routes additionally require, on top of
-    /// the signed upload token, via the `x-fs-internal-token` request
-    /// header. `None` (the default) preserves today's token-only trust
-    /// model. This is a stop-gap until the platform's
+    /// finalize/report-part callback routes require, on top of the signed
+    /// upload token, via the `x-fs-internal-token` request header. **Required**
+    /// (enforced by `validate()`); the sidecar must be given the same value
+    /// via `FS_SIDECAR_INTERNAL_TOKEN`. The control plane trusts the size and
+    /// SHA-256 the sidecar reports on this authenticated callback. This is a stop-gap until the platform's
     /// `toolkit-security::internal_auth` profiles are deployable in this
     /// gear — see `docs/ADR/0003-…-sidecar-data-plane.md`'s trust-model
     /// section — at which point the comparator should be swapped for
@@ -150,17 +124,6 @@ pub struct FileStorageConfig {
         serialize_with = "toolkit_utils::secret_string::serialize_option_exposed"
     )]
     pub finalize_internal_secret: Option<SecretString>,
-
-    /// When `true`, gear init fails fast if `finalize_internal_secret` is
-    /// absent instead of silently accepting the token-only trust model for
-    /// the finalize/report-part callbacks. Mirrors `require_signing_key_seed`
-    /// (`config.rs`). Defaults to `false` so existing deployments — and any
-    /// sidecar not yet redeployed with `FS_SIDECAR_INTERNAL_TOKEN` — keep
-    /// working; flip to `true` only after every sidecar talking to this
-    /// control plane has been redeployed with the matching env var (see the
-    /// migration-path note in the ADR).
-    #[serde(default)]
-    pub require_finalize_internal_secret: bool,
 }
 
 /// One S3-compatible backend entry (`FileStorageConfig::s3_backends`).
@@ -247,15 +210,6 @@ impl FileStorageConfig {
     /// anything up, so a misconfiguration fails fast with a clear message
     /// rather than manifesting as runtime misbehaviour.
     pub fn validate(&self) -> anyhow::Result<()> {
-        // A zero sweep interval with the sweep enabled turns the background
-        // loop (`sleep(Duration::from_secs(0))`) into a tight spin that pegs
-        // the runtime and floods the logs. Reject it up front.
-        if self.enable_background_sweep && self.sweep_interval_secs == 0 {
-            anyhow::bail!(
-                "invalid file-storage config: sweep_interval_secs must be > 0 when \
-                 enable_background_sweep is true"
-            );
-        }
         // A missing signing_key_seed makes gear init mint an ephemeral per-boot
         // key; in a multi-replica deployment each replica would get a
         // different key, breaking signed URLs across replicas. Require an
@@ -266,14 +220,17 @@ impl FileStorageConfig {
                  require_signing_key_seed: false to allow an ephemeral per-boot key in dev)"
             );
         }
-        // A missing finalize_internal_secret with the flag set would silently
-        // fall back to the token-only trust model for the s2s finalize/
-        // report-part callbacks — require an explicit opt-out (P2 0.1
-        // remaining).
-        if self.require_finalize_internal_secret && self.finalize_internal_secret.is_none() {
+        // The s2s finalize/report-part callbacks are authorized by the signed
+        // token plus this shared secret, and finalize trusts the size/hash the
+        // sidecar reports on them, so the secret is mandatory.
+        if self
+            .finalize_internal_secret
+            .as_ref()
+            .is_none_or(|s| s.expose().is_empty())
+        {
             anyhow::bail!(
-                "invalid file-storage config: finalize_internal_secret is required (set \
-                 require_finalize_internal_secret: false to allow the token-only trust model)"
+                "invalid file-storage config: finalize_internal_secret is required (set the \
+                 same value as the sidecar's FS_SIDECAR_INTERNAL_TOKEN)"
             );
         }
         Ok(())
@@ -290,9 +247,6 @@ impl fmt::Debug for FileStorageConfig {
             .field("max_page_size", &self.max_page_size)
             .field("storage_root", &self.storage_root)
             .field("idempotency_ttl_secs", &self.idempotency_ttl_secs)
-            .field("orphan_grace_secs", &self.orphan_grace_secs)
-            .field("sweep_interval_secs", &self.sweep_interval_secs)
-            .field("enable_background_sweep", &self.enable_background_sweep)
             .field("enable_in_memory_backend", &self.enable_in_memory_backend)
             // Never print the signing key — only whether one is configured.
             .field(
@@ -312,10 +266,6 @@ impl fmt::Debug for FileStorageConfig {
                 "finalize_internal_secret",
                 &self.finalize_internal_secret.as_ref().map(|_| "<redacted>"),
             )
-            .field(
-                "require_finalize_internal_secret",
-                &self.require_finalize_internal_secret,
-            )
             .finish()
     }
 }
@@ -332,14 +282,10 @@ impl Default for FileStorageConfig {
             signing_key_seed: None,
             require_signing_key_seed: default_require_signing_key_seed(),
             idempotency_ttl_secs: default_idempotency_ttl_secs(),
-            orphan_grace_secs: default_orphan_grace_secs(),
-            sweep_interval_secs: default_sweep_interval_secs(),
-            enable_background_sweep: default_enable_background_sweep(),
             enable_in_memory_backend: false,
             s3_backends: Vec::new(),
             default_backend_id: None,
             finalize_internal_secret: None,
-            require_finalize_internal_secret: false,
         }
     }
 }
@@ -373,18 +319,6 @@ fn default_storage_root() -> String {
 
 fn default_idempotency_ttl_secs() -> u64 {
     86400 // 24 hours
-}
-
-fn default_orphan_grace_secs() -> u64 {
-    3600 // 1 hour
-}
-
-fn default_sweep_interval_secs() -> u64 {
-    3600 // 1 hour
-}
-
-fn default_enable_background_sweep() -> bool {
-    true // on by default; test/dev harnesses building a config directly must opt out explicitly for determinism
 }
 
 fn default_require_signing_key_seed() -> bool {

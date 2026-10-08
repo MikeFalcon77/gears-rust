@@ -42,13 +42,13 @@ pub(crate) fn register_routes(
 ) -> Router {
     // ── Data-plane finalize (s2s, token-authenticated) ──────────────────────
     // This endpoint is NOT authenticated via the end-user JWT middleware; the
-    // signed upload token is the sole authorization.
+    // signed upload token plus the internal credential are the authorization.
     //
     // Registered as `.anonymous()` so the api-gateway's route-policy does NOT
     // require a user JWT for this path (the fs-token carries the authorization).
     // The Verifier extension is added to the whole router at the bottom.
     //
-    // P2 0.1 remaining: `finalize_auth` layers an optional interim
+    // P2 0.1 remaining: `finalize_auth` layers a mandatory interim
     // gear-local shared-secret second factor on top of the fs-token for
     // both routes below (see `handlers::FinalizeAuth`'s doc comment).
     let verifier: Arc<Verifier> = Arc::new(service.verifier());
@@ -61,7 +61,7 @@ pub(crate) fn register_routes(
     .description(
         "Called by the sidecar after a successful PUT to mark the version `available`. \
          Authorized by the signed upload token (fs-token) \u{2014} no user JWT required. \
-         Requires internal credential (x-fs-internal-token) when configured (P2 0.1).",
+         Requires the internal credential (x-fs-internal-token).",
     )
     .tag(API_TAG)
     .path_param("file_id", "File UUID")
@@ -75,7 +75,7 @@ pub(crate) fn register_routes(
 
     // ── Data-plane report-part (s2s, token-authenticated) ───────────────────
     // Same trust model as finalize above: the signed `multipart_part` token is
-    // the sole authorization, no user JWT required (P2 0.2 group B — the
+    // the authorization (plus the internal credential), no user JWT required (P2 0.2 group B — the
     // "report part" callback that closes the structural gap where nothing
     // ever populated `multipart_upload_parts` in a real deployment).
     router = OperationBuilder::post(format!(
@@ -88,7 +88,7 @@ pub(crate) fn register_routes(
         "Called by the sidecar after a successful part write to record the part's backend \
          ETag, hash, and size so `complete` can assemble from real reported parts. \
          Authorized by the signed upload token (fs-token) \u{2014} no user JWT required. \
-         Requires internal credential (x-fs-internal-token) when configured (P2 0.1).",
+         Requires the internal credential (x-fs-internal-token).",
     )
     .tag(API_TAG)
     .path_param("file_id", "File UUID")

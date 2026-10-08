@@ -273,7 +273,7 @@ Unavailable` with `Retry-After: 5` (`"backend temporarily unavailable, retry"`),
 The sidecar verifies the signed token and its claims before serving — a valid token is the delegated authorization
 decision, so there is no request-time PDP call and no platform-JWT check of any kind (the `tok.<claim>` predicate
 described above is not implemented). On `PUT` it streams bytes to the backend and then calls the control-plane
-finalize callback, authorized solely by that same signed upload token (see
+finalize callback, authorized by that same signed upload token plus the mandatory internal credential (see
 [Data-plane callbacks](#data-plane-callbacks-sidecar--control-plane-s2s-token-authenticated) below) — the sidecar
 holds **no** direct DB connection and is a thin, stateless byte-mover (a direct-DB mode is a possible future
 co-located optimization; see ADR-0003). The sidecar never binds — see "Upload, bind, and the conflict retry" below.
@@ -282,19 +282,20 @@ co-located optimization; see ADR-0003). The sidecar never binds — see "Upload,
 
 These control-plane endpoints are called by the **sidecar**, not by end clients, and are registered `.public()` —
 the api-gateway does **not** require an end-user JWT for them. The signed upload/part token (in the `x-fs-token`
-request header) is the sole authorization; there is no request-time PDP call. The client-supplied `size`/`hash_hex`
-are not trusted: the control plane reads the blob back from the backend and recomputes both before persisting
-anything.
+request header) together with the mandatory internal credential (below) is the authorization; there is no
+request-time PDP call. The `size`/`hash_hex` are the values the sidecar measured while streaming and are trusted
+because the callback is authenticated by that credential: the control plane does not read the blob back. It checks
+the claimed `size` against the stored object's length via backend metadata and reads only a bounded prefix for MIME
+sniffing.
 
 **Internal credential.** The `fs-token` is client-visible (returned in plaintext inside `upload_url`), so on its own
-it does not prove the caller is the sidecar rather than the uploading client itself. Both routes below optionally
-require a second factor: when `FileStorageConfig::finalize_internal_secret` is configured, the request must also
-carry a matching `x-fs-internal-token` header (constant-time-compared; `403` on missing/mismatch), checked *after*
-`fs-token` verification. `None` (the default) preserves the token-only behavior above; see
-`docs/ADR/0003-…-sidecar-data-plane.md`'s trust-model section for the mechanism (interim gear-local shared secret)
-and the required rollout order (`FS_SIDECAR_INTERNAL_TOKEN` must reach every sidecar before
-`require_finalize_internal_secret` is flipped `true`). With this second factor configured, a client-visible
-`fs-token` alone can no longer drive these two routes.
+it does not prove the caller is the sidecar rather than the uploading client itself. Both routes below therefore
+**require** a second factor: the request **MUST** carry an `x-fs-internal-token` header matching
+`FileStorageConfig::finalize_internal_secret` (constant-time-compared; `403` on missing/mismatch), checked *after*
+`fs-token` verification. `finalize_internal_secret` is mandatory (gear init fails without it) and the sidecar
+refuses to start without `FS_SIDECAR_INTERNAL_TOKEN`; see `docs/ADR/0003-…-sidecar-data-plane.md`'s trust-model
+section for the mechanism (interim gear-local shared secret). A client-visible `fs-token` alone can not drive these
+two routes.
 
 ```text
 D1. POST /files/{file_id}/versions/{version_id}/finalize
@@ -307,16 +308,15 @@ each part write in the multipart case — see `D2`).
   token's `file_id`/`version_id` must match the path).
 - **Request body** (`application/json`): `{ "size": <i64>, "hash_hex": "<64-char lowercase hex>" }` — the size and
   SHA-256 hash the sidecar itself measured while streaming.
-- **Server behavior**: re-enforces the policy size ceiling, then reads the blob back from the backend at the
-  version's `backend_path`, recomputes its actual size + SHA-256, and rejects (`400`) if either does not match the
-  request body, or if no blob is present at that path at all (upload never completed). On success the version's
-  `mime_type` is also re-validated/resolved from the real bytes (magic-byte sniffing) and persisted, and the version
-  is marked `available`.
-- **Response**: `204 No Content`. Errors: `400` (validation/read-back mismatch), `403` (bad/expired/mismatched
-  token, **or** missing/mismatched `x-fs-internal-token` when `finalize_internal_secret` is configured — see
-  above), `404` (version not found), `409` (already finalized), `500` (a permanent backend fault reading the blob
-  back), `503` (a transient one — network, timeout, a dropped connection partway through the read-back, backend
-  overload — carries `Retry-After`).
+- **Server behavior**: re-enforces the policy size ceiling, then reads the stored object's length from the backend
+  (metadata only, no download) at the version's `backend_path` and rejects (`400`) if it does not match the
+  request body's `size`, or if no blob is present at that path at all (upload never completed). The reported
+  SHA-256 is persisted as is. The version's `mime_type` is re-validated/resolved from a ranged read of the object's
+  leading bytes (magic-byte sniffing) and persisted, and the version is marked `available`.
+- **Response**: `204 No Content`. Errors: `400` (validation/size mismatch or no object), `403` (bad/expired/mismatched
+  token, **or** missing/mismatched `x-fs-internal-token` — see above), `404` (version not found), `409` (already
+  finalized), `500` (a permanent backend fault reading the object's length or prefix), `503` (a transient one —
+  network, timeout, backend overload — carries `Retry-After`).
 - For a `bind: "manual"` upload (and `POST /files/{id}/versions`, which never auto-binds) this endpoint does **not**
   bind the version as current — `POST /files/{id}/bind` remains a separate, explicit client call. For the default
   `bind: "auto"` it binds inline under the same CAS and reports the outcome instead — see "Single-part bind outcome
@@ -333,7 +333,7 @@ populates `multipart_upload_parts`, the table `complete` assembles from.
   whichever caller happens to call `complete`, not the one that reported the bad hash.
 - **Response**: `204 No Content`. Errors: `400` (malformed/wrong-length `hash_hex`, or a reported `size` that does not
   match the per-part size minted into the token at initiate time), `403` (bad/expired/mismatched token, **or**
-  missing/mismatched `x-fs-internal-token` when configured — see above), `404`, `409` (the session is no longer
+  missing/mismatched `x-fs-internal-token` — see above), `404`, `409` (the session is no longer
   `in_progress` — already completed/aborted/expired), `500`.
 
 ## P2 — Multipart upload
@@ -461,7 +461,7 @@ I/O): while another caller holds a live lease the response is `202 Accepted`
 completer that crashes mid-assembly leaves `completing` behind; after `lease_until` (config
 `multipart_complete_lease_secs`, default 120s) the next `complete` takes the lease over and finishes (re-using the
 already-assembled object where possible). Sessions stuck in `completing` past `expires_at` (with an expired lease)
-are backstopped by the cleanup engine's abandoned-session sweep. The complete per-state failure matrix and race
+are meant to be backstopped by a cleanup job (not running yet). The complete per-state failure matrix and race
 catalog for both upload paths is [concurrency-and-failure-model.md](./concurrency-and-failure-model.md).
 
 **Wire-spelling stability (`bind_state` / `state`).** `bind_state` (`"bound"`/`"conflict"`/`"manual"`) and the
@@ -552,8 +552,9 @@ GET  /policy/effective?user_owner_id=<uuid>              compute the effective (
 
 ## P2 — Retention rules
 
-Tenant/user/file-scoped rules (age-based, inactivity-based, or custom-metadata-value-based) evaluated by the
-background cleanup sweep (see `docs/operations.md`), which deletes files matching an active rule's criteria.
+Tenant/user/file-scoped rules (age-based, inactivity-based, or custom-metadata-value-based) intended to be evaluated by a
+cleanup job that deletes files matching an active rule's criteria. **Not enforced yet**: the gear runs no background
+worker, so rules can be stored but nothing deletes files (see `docs/operations.md`).
 
 ```text
 GET    /retention-rules             list retention rules for the caller's tenant (cursor-paginated)
@@ -566,7 +567,7 @@ DELETE /retention-rules/{rule_id}   delete a retention rule
   created `RetentionRuleDto` (`201`). Semantic validation rejects with
   `400`: a body with **all three** of `age`/`inactivity`/`metadata` absent (a rule that could never match any file);
   `age.max_age_days` or `inactivity.inactivity_days` **less than 1** (either would match every file in the tenant on
-  the very next sweep tick); and `scope` ∈ `{user, file}` with `scope_target_id` omitted.
+  the first cleanup run, once one exists); and `scope` ∈ `{user, file}` with `scope_target_id` omitted.
 - `GET /retention-rules` (no scope filter query param; `?limit`/`?cursor` — see
   [Cursor pagination](#cursor-pagination)) returns every rule in the caller's tenant, across every scope, only when
   the caller holds `ADMIN_POLICY`. A non-admin caller instead gets a filtered view: all `tenant`-scope rules,
@@ -580,7 +581,7 @@ DELETE /retention-rules/{rule_id}   delete a retention rule
   via delegated `WRITE` on a file the creator does not own stays invisible to that creator, since visibility is
   gated on file *ownership*, not on having created the rule.
 - `POST /retention-rules` with `scope="tenant"` requires the caller's `ADMIN_POLICY` authorization scope, with no
-  fallback to `WRITE` — a tenant-scope rule is a standing instruction for the background sweep to permanently
+  fallback to `WRITE` — a tenant-scope rule is a standing instruction for the (future) cleanup job to permanently
   delete every matching file for every subject in the tenant, so ordinary file-`WRITE` is not enough.
 - `DELETE /retention-rules/{rule_id}` → `204`, or `404` if the rule does not exist.
 
@@ -636,7 +637,7 @@ identically to a manual bind and to an auto-bind whose CAS lost and reported `bi
 3. **Finalize**: once the `PUT` completes, the sidecar calls the control plane's token-authenticated
    `POST /files/{id}/versions/{version_id}/finalize` callback (see
    [Data-plane callbacks](#data-plane-callbacks-sidecar--control-plane-s2s-token-authenticated)). The control plane
-   reads the blob back, verifies size + SHA-256, and flips the version `pending → available`. For a `bind: "manual"`
+   checks the stored size against the sidecar's report, validates the MIME prefix, and flips the version `pending → available`. For a `bind: "manual"`
    upload this step never touches `content_id`; for `bind: "auto"` it also performs the pointer swap inline, in the
    same transaction, under CAS (see above) — there is no separate step 4 in that case.
 4. **Bind** (`bind: "manual"` only, or a rebind after an auto-bind's CAS lost): the client calls
@@ -659,7 +660,7 @@ already-`available` version persists.
 (`POST /files/{id}/bind`), **independent of the signed upload URL** — so the upload URL's `exp` is irrelevant to the
 retry and the bytes are not re-sent (the version persists as-is). Re-presigning is **not** idempotent: a fresh
 `POST /files/{id}/versions` + upload creates a **new sibling `version_id`**. If that sibling is abandoned before
-`finalize`, the cleanup engine's abandoned-pending sweep reclaims it after `orphan_grace_secs`
+`finalize`, a cleanup job (not running yet) is meant to reclaim it after the orphan grace period
 (`cpt-cf-file-storage-fr-orphan-reconciliation`) — but if it is finalized (`available`) and simply never bound, it is
 **not** swept by anything: it persists as an extra stored version until it is either bound or explicitly
 deleted. Clients **should** rebind the already-uploaded `version_id` instead, both to avoid the wasted upload and to
@@ -896,7 +897,7 @@ access or carry substantially more per-request state in the token than it does t
   platform — there is no `412`-mapped canonical-error variant; the rebind case reads "If-Match is required to rebind
   already-bound content"); a
   multipart initiate whose target backend does not support native multipart (`MULTIPART_NOT_SUPPORTED`); the
-  finalize callback's read-back size/hash/mime not matching the sidecar's claim, or no blob present at the
+  finalize callback's claimed size not matching the stored object, a MIME mismatch on the object's prefix,, or no blob present at the
   version's backend path at all (control plane, `POST .../finalize` — see
   [Data-plane callbacks](#data-plane-callbacks-sidecar--control-plane-s2s-token-authenticated)); invalid GTS file
   type format (control plane); or the sidecar's `fs-token` query param and `X-FS-Token` header both present but
@@ -906,8 +907,7 @@ access or carry substantially more per-request state in the token than it does t
   that fails to verify gets `403` instead — see below).
 - `403 Forbidden` — authorization denied (control), or token verification failed at the sidecar: bad signature/
   encoding, expired (`now >= exp` — expiry is exclusive), method ≠ the `op` claim, part-number mismatch on a
-  multipart-part route, or (finalize/report-part only) a missing/mismatched `x-fs-internal-token` when
-  `finalize_internal_secret` is configured. (The `ip`/`tok.<claim>` checks and the `max_url_ttl` cap described
+  multipart-part route, or (finalize/report-part only) a missing/mismatched `x-fs-internal-token`. (The `ip`/`tok.<claim>` checks and the `max_url_ttl` cap described
   elsewhere in this doc as constraints are, respectively, not implemented and enforced at signing rather than
   re-checked here.)
 - `404 Not Found` — file, version, or retention rule does not exist.

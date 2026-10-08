@@ -1,8 +1,8 @@
 # FileStorage — Operational Configuration
 
 This document covers every `FileStorageConfig` field (`gears/file-storage/file-storage/src/config.rs`), the sidecar's
-own `FS_SIDECAR_*` environment variables (`gears/file-storage/file-storage/src/bin/sidecar.rs`), and the background
-`CleanupEngine` sweep those config fields drive.
+own `FS_SIDECAR_*` environment variables (`gears/file-storage/file-storage/src/bin/sidecar.rs`), and the state of the
+`CleanupEngine` (not scheduled by the gear).
 
 Every field below is verified against the current `default_*()` function or `main()`'s env-var parsing — each entry
 names the function (or environment variable) that sets its default, rather than a line number, since line numbers
@@ -12,7 +12,7 @@ drift with every edit.
 
 - [Control-plane config: `FileStorageConfig`](#control-plane-config-filestorageconfig)
 - [Sidecar config: `FS_SIDECAR_*` environment variables](#sidecar-config-fs_sidecar_-environment-variables)
-- [The background cleanup sweep](#the-background-cleanup-sweep)
+- [Cleanup (not running yet)](#cleanup-not-running-yet)
 - [Idempotent-create semantics](#idempotent-create-semantics)
 - [Upgrading from v0.2.x and rolling back](#upgrading-from-v02x-and-rolling-back)
 - [Storage quota (not enforced)](#storage-quota-not-enforced)
@@ -27,28 +27,26 @@ gear started with no `file-storage` config section at all gets every default bel
 actually boot**: `require_signing_key_seed` defaults to `true` with `signing_key_seed` unset, and
 `FileStorageConfig::validate()` fails gear init on exactly that combination (see `require_signing_key_seed` below).
 A genuinely zero-config deployment is dev/test-only (set `require_signing_key_seed: false` there).
-`FileStorageConfig::validate()` (called at gear init, before anything is wired up) rejects **twenty-five**
-invalid configurations — nine missing-secret/zero-value guards (`sweep_interval_secs == 0` or
-`sweep_time_budget_secs == 0` with the sweep enabled;
-`default_url_ttl_secs`, `multipart_session_ttl_secs`, `multipart_complete_lease_secs`, `migrate_timeout_secs` or
-`migrate_lease_margin_secs` equal to `0`, instead of
-silently using one second; `signing_key_seed` absent while required; `finalize_internal_secret` absent while
-required); eleven absolute
-ceilings (`finalize_token_grace_secs` above `MAX_FINALIZE_TOKEN_GRACE_SECS`, 7 days; `max_page_size` above
+`FileStorageConfig::validate()` (called at gear init, before anything is wired up) rejects invalid configurations —
+missing-secret/zero-value guards (`default_url_ttl_secs`, `multipart_session_ttl_secs`,
+`multipart_complete_lease_secs`, `migrate_timeout_secs` or `migrate_lease_margin_secs` equal to `0`, instead of
+silently using one second; `signing_key_seed` absent while required; `finalize_internal_secret` absent or empty);
+absolute ceilings (`finalize_token_grace_secs` above `MAX_FINALIZE_TOKEN_GRACE_SECS`, 7 days; `max_page_size` above
 `MAX_PAGE_SIZE_CEILING`, 200; `max_url_ttl_secs` above `MAX_URL_TTL_CEILING`, 30 days; `multipart_session_ttl_secs`
 above `MAX_MULTIPART_SESSION_TTL_SECS`, 30 days; `multipart_complete_lease_secs` above
 `MAX_MULTIPART_COMPLETE_LEASE_SECS`, 1 day; `migrate_timeout_secs` above `MAX_MIGRATE_TIMEOUT_SECS`, 1 day;
-`migrate_lease_margin_secs` above `MAX_MIGRATE_LEASE_MARGIN_SECS`, 1 hour; `orphan_grace_secs` above `MAX_ORPHAN_GRACE_SECS`, 30 days;
-`idempotency_ttl_secs` above `MAX_IDEMPOTENCY_TTL_SECS`, 30 days; `sweep_time_budget_secs` above
-`MAX_SWEEP_TIME_BUDGET_SECS`, 24 hours; `previous_signing_public_keys` having more than
-`infra::signed_url::MAX_PREVIOUS_SIGNING_PUBLIC_KEYS`, 8, entries — see those fields below); four cross-field ordering invariants (`default_url_ttl_secs`
-vs. `max_url_ttl_secs`; `default_page_size` vs. `max_page_size`; `default_url_ttl_secs` vs. `orphan_grace_secs`;
+`migrate_lease_margin_secs` above `MAX_MIGRATE_LEASE_MARGIN_SECS`, 1 hour;
+`idempotency_ttl_secs` above `MAX_IDEMPOTENCY_TTL_SECS`, 30 days; `previous_signing_public_keys` having more than
+`infra::signed_url::MAX_PREVIOUS_SIGNING_PUBLIC_KEYS`, 8, entries — see those fields below); cross-field ordering
+invariants (`default_url_ttl_secs` vs. `max_url_ttl_secs`; `default_page_size` vs. `max_page_size`;
 `multipart_session_ttl_secs` vs. `default_url_ttl_secs`); and one per-entry format check (each
 `previous_signing_public_keys` entry must be a validly-formed, 32-byte Ed25519 public key — see that field below) —
-noted inline below. A separate check (`max_url_ttl_secs` vs. `orphan_grace_secs`) only logs a `warn` rather than
-rejecting, since the recommended defaults (7 days vs. 1 hour) would otherwise fail on every default deployment — see
-`orphan_grace_secs` below. Function names (rather than line numbers) are used as source pointers throughout this
+noted inline below. Function names (rather than line numbers) are used as source pointers throughout this
 table since line numbers drift with every edit.
+
+**Removed keys.** `enable_background_sweep`, `sweep_interval_secs`, `sweep_time_budget_secs`, `orphan_grace_secs` and
+`require_finalize_internal_secret` no longer exist: there is no background sweep, and the internal secret is always
+required. Because the config struct denies unknown fields, a config that still sets any of them fails to load.
 
 Config for this gear (like every gear on this platform) is loaded from its own platform YAML configuration section —
 there is no standalone TOML/JSON file of its own.
@@ -69,15 +67,10 @@ there is no standalone TOML/JSON file of its own.
 | `signing_key_seed` | `None` (no `#[serde(default = …)]`, just `Option::default()`) | struct field default |
 | `require_signing_key_seed` | `true` | `default_require_signing_key_seed()` |
 | `idempotency_ttl_secs` | `86400` (24h) | `default_idempotency_ttl_secs()` |
-| `orphan_grace_secs` | `3600` (1h) | `default_orphan_grace_secs()` |
-| `sweep_interval_secs` | `3600` (1h) | `default_sweep_interval_secs()` |
-| `sweep_time_budget_secs` | `900` (15 min) | `default_sweep_time_budget_secs()` |
-| `enable_background_sweep` | `true` | `default_enable_background_sweep()` |
 | `enable_in_memory_backend` | `false` (bare `#[serde(default)]`) | struct field default |
 | `s3_backends` | `[]` (empty, bare `#[serde(default)]`) | struct field default |
 | `default_backend_id` | `None` (bare `#[serde(default)]`) | struct field default |
-| `finalize_internal_secret` | `None` (bare `#[serde(default)]`) | struct field default |
-| `require_finalize_internal_secret` | `false` (bare `#[serde(default)]`) | struct field default |
+| `finalize_internal_secret` | **required** (`None` fails `validate()`) | struct field default |
 | `previous_signing_public_keys` | `[]` (empty, bare `#[serde(default)]`) | struct field default |
 
 ### `default_url_ttl_secs`
@@ -88,9 +81,9 @@ recommendation**: keep short (minutes, not hours) for anything not explicitly me
 shareable; raise only for known bulk/batch workflows. **Misconfiguration risk**: too long → a leaked/logged URL stays
 exploitable for the full window; too short → legitimate slow uploads/downloads may need to be re-presigned mid-flight
 (no such retry-on-expiry logic exists in the SDK/handlers, so a very small value can break large transfers — though `finalize_token_grace_secs` below keeps an upload that outran this TTL *mid-stream* from failing at the finalize step).
-`FileStorageConfig::validate()` enforces two ordering invariants on this field at startup: it must not exceed
+`FileStorageConfig::validate()` enforces an ordering invariant on this field at startup: it must not exceed
 `max_url_ttl_secs` (otherwise the very first URL minted with no explicit override already violates the ceiling the
-control plane is supposed to enforce), and it must not exceed `orphan_grace_secs` (see that field below).
+control plane is supposed to enforce).
 
 ### `max_url_ttl_secs`
 Hard ceiling (seconds) the control plane will mint any signed URL to (`604800` = 7 days); enforced by `Issuer::issue`
@@ -127,13 +120,13 @@ transfer time.
 
 ### `multipart_session_ttl_secs`
 Lifetime (seconds, default `86400` = 24h) of a multipart session row: `expires_at` is stamped at initiate time, and
-the cleanup sweep aborts the session once it passes. Deliberately much longer than `default_url_ttl_secs` — it is a
+a cleanup job (none runs yet) is meant to abort the session once it passes. Deliberately much longer than `default_url_ttl_secs` — it is a
 budget for a whole multi-GB upload, not for one signed URL. `FileStorageConfig::validate()` **rejects** a value
 *below* `default_url_ttl_secs`: the per-part URLs are minted at initiate time with the default TTL, so a shorter
 session lifetime would let a part URL outlive the session it belongs to and have `complete`'s defense-in-depth
 expiry check reject an upload whose URLs were still technically valid. **Production recommendation**: size it to the
 slowest legitimate upload you intend to support. **Misconfiguration risk**: too short → long uploads are aborted
-mid-flight by the sweep; too long → abandoned sessions (and their backend multipart handles) linger before the
+mid-flight by that future cleanup; too long → abandoned sessions (and their backend multipart handles) linger before the
 reaper touches them. Capped at `MAX_MULTIPART_SESSION_TTL_SECS` (`2592000` s = 30 days): `validate()` fails gear
 init above it, because the value is added to the current time when a session is created and an oversized one would
 otherwise overflow that timestamp.
@@ -298,62 +291,12 @@ described above, deferred from a loud startup error to a confusing runtime sympt
 ### `idempotency_ttl_secs`
 Window (seconds, default `86400` = 24h) an `idempotency_keys` row (from `POST /files`'s `idempotency_key`) remains
 valid for replay-detection; after this, a retry with the same key is treated as a brand-new request. Expired rows
-are reclaimed by the cleanup sweep's step 4 (see below). **Production recommendation**: size to the longest
+are not reclaimed yet: no cleanup job runs (see below). **Production recommendation**: size to the longest
 realistic client retry window (default is generous for most HTTP retry policies). **Misconfiguration risk**: too
 short → a legitimately delayed retry (e.g. after a long client-side backoff) creates a duplicate file instead of
-being deduplicated; too long → more rows accumulate between sweep passes (bounded by `sweep_interval_secs`, not a
-correctness issue, just storage/index bloat). Capped at `MAX_IDEMPOTENCY_TTL_SECS` (`2592000` s = 30 days);
+being deduplicated; too long → expired rows accumulate (not a
+correctness issue, just storage/index bloat) until a cleanup job exists. Capped at `MAX_IDEMPOTENCY_TTL_SECS` (`2592000` s = 30 days);
 `validate()` fails gear init above it, since the value is added to the current time for every idempotency record.
-
-### `orphan_grace_secs`
-Grace period (seconds, default `3600` = 1h) a `pending` version or an expired multipart session must age past
-before the cleanup sweep reclaims it. **Production recommendation**: the default balances "reclaim abandoned uploads
-promptly" against "don't race a slow-but-legitimate in-flight upload." **Misconfiguration risk**: too short → a
-slow client upload can have its `pending` version reclaimed (and blob deleted) out from under it mid-upload,
-surfacing as a finalize `404`/`400`; too long → abandoned pending rows and their blobs linger longer, using storage.
-Because that first failure mode is a direct self-contradiction — a signed `PUT` URL still valid while the sweep
-reclaims the version behind it — `FileStorageConfig::validate()` **rejects** a configuration where
-`default_url_ttl_secs` exceeds `orphan_grace_secs`. There is no session row to guard a single-part upload the way
-the live-multipart-session guard protects a multipart one, so this config check is the only thing enforcing it.
-Capped at `MAX_ORPHAN_GRACE_SECS` (`2592000` s = 30 days); `validate()` fails gear init above it.
-
-### `sweep_interval_secs`
-How often (seconds, default `3600` = 1h) the background cleanup sweep fires, when `enable_background_sweep` is
-`true`. `FileStorageConfig::validate()` **rejects** `sweep_interval_secs == 0` combined with
-`enable_background_sweep == true` at startup (a zero interval would otherwise spin the sweep loop tightly, pegging
-the runtime and flooding logs). **Production recommendation**: the 1-hour default is reasonable for most deployments;
-tighten it if orphan reconciliation / retention-driven deletion needs to be closer to real-time. **Misconfiguration
-risk**: too long → orphaned pending versions, expired multipart sessions, retention-expired files, and expired
-idempotency keys all accumulate for longer between passes (storage growth, and retention-policy compliance windows
-run wider than the policy nominally states).
-
-### `sweep_time_budget_secs`
-Overall wall-clock time budget (seconds, default `900` = 15 min) for one background cleanup sweep tick. Within that
-budget, each of the four sweep steps keeps taking another bounded batch — interleaved in the same fixed step order,
-one batch per not-yet-exhausted step per pass — until every step is exhausted (its last batch came back short, or
-its query/delete errored) or the budget runs out; whatever is left carries over to the next tick rather than being
-dropped. The very first pass of a tick always completes in full regardless of the budget, so even a very small
-budget still processes one batch per step every tick — the historical single-batch-per-call behaviour is the floor,
-never less. `FileStorageConfig::validate()` **rejects** `sweep_time_budget_secs == 0` combined with
-`enable_background_sweep == true` at startup, the same way it rejects `sweep_interval_secs == 0` above (a zero
-budget would silently cap every tick at exactly that one unconditional first pass). **Production recommendation**:
-the 15-minute default comfortably covers a normal-sized backlog well inside a `sweep_interval_secs` cycle; raise it
-if a deployment's backlog routinely needs more than one tick to clear (see [The background cleanup
-sweep](#the-background-cleanup-sweep) below for how the four steps' cursors behave across ticks). **Misconfiguration
-risk**: too short → most ticks report `budget_exhausted = true` and only make partial progress per tick (not
-incorrect, just slower to converge); too long → one tick can run for most of a `sweep_interval_secs` cycle, though
-still bounded by this budget rather than able to run forever. Capped at `MAX_SWEEP_TIME_BUDGET_SECS` (`86400` s = 24
-hours); `validate()` fails gear init above it.
-
-### `enable_background_sweep`
-When `true` (**the default**), the cleanup sweep loop starts at gear init. **Production recommendation**: leave at
-`true` in every real deployment; set `false` only in test/dev harnesses that construct a `FileStorageConfig` directly
-(not via YAML) and need fully deterministic behavior (no background task racing test assertions). **Misconfiguration
-risk**: `false` in production means **no** orphan reconciliation, **no** expired-multipart cleanup, **no**
-retention-policy enforcement, and **no** idempotency-key garbage collection ever run — pending versions and
-abandoned multipart sessions accumulate indefinitely, retention rules become inert (a compliance-relevant silent
-failure, since a configured retention policy will appear to exist via `GET /retention-rules` but never actually
-delete anything), and `idempotency_keys` grows without bound.
 
 ### `enable_in_memory_backend`
 When `true` (default `false`), an additional non-durable backend registered under the id `memory` (`MEMORY_ID`,
@@ -387,11 +330,11 @@ of the rule — the `+ 1` guarantees at least one full day of headroom beyond th
 of how the TTL lines up with day boundaries. Example: a 48h TTL (172800 s) needs a minimum of 3 days, not 2. This is
 safe because no session outlives its `expires_at` (a resume re-caps `exp` at the same `expires_at`), so a handle still
 open once that many days have passed is by construction already abandoned. FileStorage aborts backend multipart
-handles on a best-effort basis only, and two windows are not covered by any sweep: a control-plane crash between
+handles on a best-effort basis only, and two windows are not covered by any cleanup: a control-plane crash between
 `initiate_multipart` and the session-row insert leaves a handle with no persisted correlation at all, and a backend
 abort that fails after the session has already flipped to `aborted` is never retried (later passes list only
 `in_progress` and lease-expired `completing` sessions). No object bytes are at stake in either case, but S3 bills for
-incomplete multipart uploads. The sweep remains the primary reclamation path; the lifecycle rule is only the
+incomplete multipart uploads. Until a cleanup job exists the lifecycle rule is the only reclamation path, and later it remains the
 backstop for these two uncorrelated windows — see `concurrency-and-failure-model.md` §5.
 
 **The endpoint must honour conditional writes (`If-None-Match: *`)** — this is a **requirement** for any S3-compatible
@@ -440,19 +383,16 @@ dev/test `memory` backend (`enable_in_memory_backend` above), to enable multipar
 "P2 — Multipart upload" section.
 
 ### `finalize_internal_secret`
-Interim gear-local shared secret the s2s finalize/report-part callback routes additionally require, on top of the
-signed upload token, via the `x-fs-internal-token` request header. `None` (the default) preserves the token-only
-trust model. This is a stop-gap until the platform's `toolkit-security::internal_auth` profiles are deployable in
-this gear (see [ADR-0003](./ADR/0003-cpt-cf-file-storage-adr-sidecar-data-plane.md)'s trust-model section).
-Enforcement begins the moment this secret is set, independent of `require_finalize_internal_secret`:
-`FinalizeAuth::verify` is a no-op only while the secret is `None`; the flag doesn't gate the check at all, it only
-turns a missing secret into a startup error. Once a secret is configured, the control plane rejects with `403`
-every sidecar callback lacking a matching `x-fs-internal-token`, which the client sees as a `502` on every fresh
-single-part `PUT` (a replay of the same `PUT` is answered `409`, per the sidecar's `!created` decision table) and
-on every part of a multipart upload. **Rollout order**: (1) redeploy every sidecar talking
-to this control plane with `FS_SIDECAR_INTERNAL_TOKEN` set first — a control plane with no secret configured
-ignores the header either way; (2) only then set `finalize_internal_secret` on the control plane, together with
-`require_finalize_internal_secret: true`.
+Interim gear-local shared secret the s2s finalize/report-part callback routes require, on top of the signed upload
+token, via the `x-fs-internal-token` request header. **Required**: `validate()` fails gear init when it is missing or
+empty, and the sidecar must be given the same value as `FS_SIDECAR_INTERNAL_TOKEN` (it refuses to start without it).
+The control plane trusts the size and SHA-256 the sidecar reports on these authenticated callbacks and does not
+re-read the object at finalize (it checks the stored length via backend metadata and reads only the MIME-sniff
+prefix). This is a stop-gap until the platform's `toolkit-security::internal_auth` profiles are deployable in this
+gear (see [ADR-0003](./ADR/0003-cpt-cf-file-storage-adr-sidecar-data-plane.md)'s trust-model section). The control
+plane rejects with `403` every sidecar callback lacking a matching `x-fs-internal-token`, which the client sees as a
+`502` on every fresh single-part `PUT` (a replay of the same `PUT` is answered `409`, per the sidecar's `!created`
+decision table) and on every part of a multipart upload.
 
 **Rotating an already-configured secret is a brief upload outage, not a zero-downtime operation.**
 `FinalizeAuth` holds exactly one secret, built once at gear init and kept in a `OnceLock`, so changing it takes a
@@ -466,12 +406,6 @@ code change, and is expected to arrive with the `internal_auth` migration that r
 
 Never logged (`FileStorageConfig`'s manual `Debug` impl redacts it).
 
-### `require_finalize_internal_secret`
-When `true`, gear init fails fast if `finalize_internal_secret` is absent instead of silently accepting the
-token-only trust model for the finalize/report-part callbacks. Mirrors `require_signing_key_seed`. Defaults to
-`false` so a control plane with no secret configured still starts. This flag does not disable the enforcement
-check — see the rollout order under `finalize_internal_secret` above for the sequencing that actually matters.
-
 ## Sidecar config: `FS_SIDECAR_*` environment variables
 
 The sidecar is a separate binary/process (`src/bin/sidecar.rs`) with its own env-var configuration — it does **not**
@@ -483,13 +417,13 @@ share `FileStorageConfig`. All of these are read once in `main()`.
 | `FS_SIDECAR_PUBLIC_KEY` | **required, no default** | Base64url Ed25519 **primary** public key; must match the control plane's `signing_key_seed`-derived keypair (see above). Startup fails (`anyhow::anyhow!`) if unset or malformed. |
 | `FS_SIDECAR_PREVIOUS_PUBLIC_KEYS` | unset (no previous keys) | Optional comma-separated list of additional base64url Ed25519 public keys, checked **after** the primary (same "try each, first match wins" verifier — no `kid`). Exists purely to give a `signing_key_seed` rotation a window where tokens signed by either the old or the new key still verify — see `signing_key_seed`'s **Rotation** paragraph below for the procedure. **Cost**: one extra Ed25519 verification per token that fails against the primary, times the list length — keep it short (one entry covering the immediately-prior seed is the normal case) and drop a key once `max_url_ttl_secs` has passed since the seed that produced it stopped being primary, so no still-valid token could possibly have been signed with it. Capped at `infra::signed_url::MAX_PREVIOUS_SIGNING_PUBLIC_KEYS` (8) entries; `build_config` fails sidecar startup above it, for the same unbounded-linear-scan reason as the control plane's own `previous_signing_public_keys` ceiling above. An entry that duplicates `FS_SIDECAR_PUBLIC_KEY` or repeats elsewhere within the list is dropped at startup with a `warn`-level log (`dropped_duplicates`) rather than rejected — a harmless no-op, not a startup error, since the list need not be scrubbed the instant a rotation finishes, but the warning is a signal that step 4 of the rotation procedure has not been completed yet. A malformed entry fails sidecar startup exactly like a malformed `FS_SIDECAR_PUBLIC_KEY`. |
 | `FS_SIDECAR_BACKEND_ROOT` | `./.file-storage-data` | Local-fs backend root — same durability caveat as the control plane's `storage_root`; the two should point at the **same** underlying storage for a single-backend deployment, or the sidecar will read/write blobs the control plane's metadata doesn't expect to find there. |
-| `FS_SIDECAR_CONTROL_URL` | `http://localhost:8080` | Base URL of the control plane, used for the finalize/report-part callbacks. Setting it to the **empty string** explicitly disables the callback (dev/test only) — uploaded versions then stay `pending` forever, since nothing ever calls finalize; production must always set this to a reachable control-plane URL. The scheme is **not** validated, and the callbacks carry `x-fs-token` plus, when configured, the `x-fs-internal-token` shared secret — so keep this hop inside a trusted network boundary or point it at an HTTPS/mTLS endpoint; a plain-HTTP URL puts that secret on the wire in the clear. |
+| `FS_SIDECAR_CONTROL_URL` | `http://localhost:8080` | Base URL of the control plane, used for the finalize/report-part callbacks. Setting it to the **empty string** explicitly disables the callback (dev/test only) — uploaded versions then stay `pending` forever, since nothing ever calls finalize; production must always set this to a reachable control-plane URL. The scheme is **not** validated, and the callbacks carry `x-fs-token` plus the `x-fs-internal-token` shared secret — so keep this hop inside a trusted network boundary or point it at an HTTPS/mTLS endpoint; a plain-HTTP URL puts that secret on the wire in the clear. |
 | `FS_SIDECAR_MAX_BODY_BYTES` | `5368709120` (5 GiB) | Raises axum's blanket request-body floor (default 2 MiB). The limit is a `DefaultBodyLimit` layer on the **whole** sidecar router (`build_router`), so it applies to the request bodies of the single-part `PUT` and of multipart part uploads alike — not only to the single-part route. It does **not** bound download responses: the limit governs request-body extraction, and a download is a `GET`/`HEAD` whose response is streamed past it. This is a transport-layer ceiling only — the real per-request limit is the signed token's `max_size`/`exact_size` claim. **Misconfiguration risk**: setting it below the largest policy-permitted single-part upload causes legitimate uploads to be rejected at the transport layer before the token-level check even runs; because the planner may widen `part_size` up to `MAX_PART_SIZE` (5 GiB) for very large objects, lowering this variable can also reject every *part* of a multipart upload with `413`, which is easy to miss when tuning it with only single-part uploads in mind. |
 | `FS_SIDECAR_BODY_IDLE_TIMEOUT_SECS` | `60` | Maximum pause the sidecar tolerates between two consecutive chunks of a client's request body — and before the first one — on the single-part `PUT` upload and on `upload_multipart_part`; `0` disables the guard. This is a **per-chunk idle** bound, not a deadline on the whole stream: a slow-but-steady multi-GiB upload that never pauses longer than this between chunks still completes, no matter how long it takes overall. It closes a gap neither of the other two body-related controls covers: the signed token's `exp` is checked exactly once, before any body bytes are read, and `FS_SIDECAR_MAX_BODY_BYTES` bounds bytes, not time — without this timeout, a client that opens the connection and then stalls (or never sends at all) could hold the request open indefinitely (CWE-400). A client that goes idle past the deadline gets `408 Request Timeout`; the partial object is cleaned up exactly like any other broken upload stream (see F2 in [concurrency-and-failure-model.md](./concurrency-and-failure-model.md)). Independent of `FS_SIDECAR_FINALIZE_TIMEOUT_SECS`/`FS_SIDECAR_FINALIZE_CONNECT_TIMEOUT_SECS` below, which bound the sidecar→control-plane callback *after* the body stream has already finished. **Misconfiguration risk**: too low rejects legitimate uploads from clients on slow or lossy links (a real, live upload that merely pauses between chunks) with a `408` that looks like a client bug; too high re-opens the held-open-connection exposure this control exists to close. |
-| `FS_SIDECAR_FINALIZE_TIMEOUT_SECS` | `10` | Total wall-clock **budget** for the sidecar → control-plane finalize/report-part callback, covering the **entire retry loop** (all `CALLBACK_MAX_ATTEMPTS = 3` attempts and the delays between them), not a per-attempt allowance — `post_with_retry` wraps the whole loop in one deadline sized to this value, so a hung/unreachable control plane can never hold the client's request open for more than this long regardless of how many attempts it takes. The control plane re-reads and re-hashes the whole object inside this window on the single-part finalize path, so the budget has to cover a full read-back, not just the round trip. **Misconfiguration risk**: a single-part object whose read-back reliably exceeds the timeout never finalizes — the client sees `502` even though the bytes landed (F5 in [concurrency-and-failure-model.md](./concurrency-and-failure-model.md)). Raise the timeout for such workloads, or use multipart, whose `complete` performs no full read-back (ADR-0006). |
+| `FS_SIDECAR_FINALIZE_TIMEOUT_SECS` | `10` | Total wall-clock **budget** for the sidecar → control-plane finalize/report-part callback, covering the **entire retry loop** (all `CALLBACK_MAX_ATTEMPTS = 3` attempts and the delays between them), not a per-attempt allowance — `post_with_retry` wraps the whole loop in one deadline sized to this value, so a hung/unreachable control plane can never hold the client's request open for more than this long regardless of how many attempts it takes. The control plane does not re-read the object at finalize (a metadata size check plus a ranged MIME-prefix read), so the budget only has to cover the round trip and those two backend calls. **Misconfiguration risk**: too low → the callback times out and the client sees `502` even though the bytes landed (F5 in [concurrency-and-failure-model.md](./concurrency-and-failure-model.md)). |
 | `FS_SIDECAR_FINALIZE_CONNECT_TIMEOUT_SECS` | `5` | Connect timeout for the same callbacks. Together with the timeout above, bounds how long a client's upload request can be held open by an unreachable or hung control plane — without these timeouts, a hung control plane could block the client indefinitely. **Misconfiguration risk**: too low in a high-latency network path causes spurious `502 Bad Gateway` responses to clients on otherwise-successful uploads; too high re-opens the "held open indefinitely" problem these timeouts exist to close. |
-| `FS_SIDECAR_INTERNAL_TOKEN` | unset (header omitted) | Interim shared secret sent as `x-fs-internal-token` on both the finalize and report-part control-plane callbacks — the sidecar's half of the control plane's `finalize_internal_secret`/`require_finalize_internal_secret` (see above). Unset/empty = the header is not sent, matching a control plane with the check disabled. Must match the control plane's configured secret from the moment `finalize_internal_secret` is set on the control plane, regardless of `require_finalize_internal_secret`. |
-| `FS_SIDECAR_S3_BACKENDS` | unset (no S3 backends) | Optional JSON array of `S3BackendConfig` entries (mirrors the control plane's `s3_backends`), folded into the sidecar's own `BackendRegistry` alongside the always-present `local-fs` backend so a control-plane-registered `S3Backend` is reachable by real traffic dispatched per-request via `claims.backend_id`. Credentials embedded in this JSON blob are acceptable for the sidecar (the one component authorized to hold them, per ADR-0003) but should be sourced from a secrets manager / mounted file in production where supported. **Keep this list in lockstep with the control plane's `s3_backends`**: signed tokens carry `backend_id` and `backend_path`, and the sidecar resolves them against *its own* registry, with no reconciliation, handshake or version check between the two. A `backend_id` the sidecar does not know fails the request with `500` ("unknown backend") after the URL was already minted; worse, an id that resolves on both sides but points at a different endpoint/bucket fails silently in the other direction — the upload lands in the wrong bucket and the control plane's read-back finds nothing, surfacing as a `502` on finalize (or a `404` on a later download) rather than as a configuration error. |
+| `FS_SIDECAR_INTERNAL_TOKEN` | **required, no default** | Interim shared secret sent as `x-fs-internal-token` on both the finalize and report-part control-plane callbacks — the sidecar's half of the control plane's `finalize_internal_secret` (see above). Startup fails if it is unset or empty. Must equal the control plane's `finalize_internal_secret`. |
+| `FS_SIDECAR_S3_BACKENDS` | unset (no S3 backends) | Optional JSON array of `S3BackendConfig` entries (mirrors the control plane's `s3_backends`), folded into the sidecar's own `BackendRegistry` alongside the always-present `local-fs` backend so a control-plane-registered `S3Backend` is reachable by real traffic dispatched per-request via `claims.backend_id`. Credentials embedded in this JSON blob are acceptable for the sidecar (the one component authorized to hold them, per ADR-0003) but should be sourced from a secrets manager / mounted file in production where supported. **Keep this list in lockstep with the control plane's `s3_backends`**: signed tokens carry `backend_id` and `backend_path`, and the sidecar resolves them against *its own* registry, with no reconciliation, handshake or version check between the two. A `backend_id` the sidecar does not know fails the request with `500` ("unknown backend") after the URL was already minted; worse, an id that resolves on both sides but points at a different endpoint/bucket fails silently in the other direction — the upload lands in the wrong bucket and the control plane's finalize size check finds no object, surfacing as a `400` on finalize (or a `404` on a later download) rather than as a configuration error. |
 
 A `multipart_native` backend's part write (`upload_multipart_part` against, e.g., an `S3Backend`) streams the
 part body straight through to the backend (`write_multipart_part_native`, `StorageBackend::upload_part_stream`) —
@@ -523,20 +457,21 @@ already-`available` status — not for an ordinary sequential retry, which conve
 specifically, the version may already be correctly finalized server-side even though the client saw a transient
 `502` on a preceding attempt (re-verify via `GET /files/{id}/versions` before assuming failure).
 
-## The background cleanup sweep
+## Cleanup (not running yet)
 
-`CleanupEngine::run_sweep` (`src/domain/cleanup.rs`) is the single entry point for the whole background lifecycle
-job the gear schedules on a `sweep_interval_secs` timer when `enable_background_sweep` is `true` (see `gear.rs`).
-Each step is **best-effort**: a failure in one step is logged at `warn` and does not abort the rest of the sweep, and
-every operation is written to be safely idempotent under concurrent sweeps (no cross-instance leader election exists
-today — every replica runs its own sweep independently; cross-instance coordination is expected in a future release).
+There is **no background worker**: the gear schedules no periodic sweep. Retention rules, abandoned `pending`
+versions, expired multipart sessions and expired idempotency keys are therefore **not cleaned up or enforced** until a
+separate cleanup job exists. `CleanupEngine::run_sweep` (`src/domain/cleanup.rs`) is kept for that job to call; the
+description below is how it behaves when invoked. Each step is **best-effort**: a failure in one step is logged at
+`warn` and does not abort the rest of the sweep, and every operation is written to be safely idempotent under
+concurrent sweeps (no cross-instance leader election exists today).
 
-Each tick has an overall time budget (`sweep_time_budget_secs`, default 15 minutes — see that field above). Rather
+Each invocation has an overall time budget. Rather
 than taking exactly one batch per step and stopping, one tick repeats the four steps below as further passes, in
 the same order, each pass taking one more batch per step that has not yet run out of candidates — until either
 every step is exhausted (its last batch came back shorter than its page size, or its query/delete errored) or the
 budget runs out. The very first pass always completes in full regardless of the budget, so even
-`sweep_time_budget_secs` set very low still processes one batch per step every tick. `run_sweep`'s returned
+a very low time budget still processes one batch per step every tick. `run_sweep`'s returned
 `SweepResult` carries `budget_exhausted` (`true` when the tick stopped on the time budget rather than because
 every step was exhausted) and `elapsed_ms` (the tick's wall-clock duration), both logged alongside the existing
 tallies.
@@ -557,12 +492,12 @@ The sweep runs **four** steps, in this order:
 1. **Abandoned-pending sweep** (`cpt-cf-file-storage-fr-orphan-reconciliation`) — runs in two phases, still just one
    of the four sweep steps:
    - **(a)** Deletes `file_versions` rows still `pending` (pre-registered but never finalized) older than
-     `orphan_grace_secs`, best-effort deletes their backend blobs, and additionally deletes the parent `files` row
+     the orphan grace period, best-effort deletes their backend blobs, and additionally deletes the parent `files` row
      too if reclaiming its last pending version leaves it a permanent zero-version orphan (no versions left **and**
      `content_id IS NULL`, and no blocking in-progress/completing multipart session for that file).
    - **(b)** Separately sweeps `files` rows that never had a version in the first place. The list query's predicate
      is exactly three conditions — `content_id IS NULL`, no rows in `file_versions`, and `created_at` older than the
-     same `grace_cutoff` (`orphan_grace_secs`) — and runs batched; each candidate is then re-verified and deleted
+     same `grace_cutoff` (the orphan grace period) — and runs batched; each candidate is then re-verified and deleted
      through the same guarded `maybe_delete_orphaned_file` path that phase (a) uses for its own zero-version case,
      writing an `OrphanReconcile` audit row and a `file.deleted` event. The absence of a blocking
      `in_progress`/`completing` multipart session for the file is deliberately **not** part of that list query: it is
@@ -574,7 +509,7 @@ The sweep runs **four** steps, in this order:
      (a) only ever fired as a side effect of reclaiming a *pending* version, and step 2's expired-session sweep only
      ever fired as a side effect of aborting a session, so a file that got neither had no reaper at all. There is no
      race with a live `POST /files`: the gap between committing the file row and inserting its pending version is
-     milliseconds, while `orphan_grace_secs` is measured in hours.
+     milliseconds, while the orphan grace period is measured in hours.
 2. **Expired-multipart sweep** — aborts `multipart_uploads` sessions whose `expires_at` has passed: those still
    `in_progress`, **and** those left `completing` by a completer that died, once their lease has expired too (a
    live lease is never reaped mid-assembly). It wins the session's own `→ aborted` CAS first (racing a concurrent

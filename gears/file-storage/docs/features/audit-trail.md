@@ -107,7 +107,7 @@ only metadata/identifiers in `detail`, never content bytes)
 > this codebase ever sets it. No relay drains `audit_outbox` (or its sibling
 > `events_outbox`) to a downstream platform sink. Concretely this means: (a)
 > rows accumulate in `audit_outbox` indefinitely with no retention or archival
-> process; (b) the background cleanup sweep's idempotency-key-expiry step
+> process; (b) the cleanup sweep's idempotency-key-expiry step
 > *deliberately* does **not** touch
 > `audit_outbox`/`events_outbox` — a row-age-based purge would silently drop rows that were never delivered, since
 > `published_at` can never become non-`NULL` today; (c) there is no way for any

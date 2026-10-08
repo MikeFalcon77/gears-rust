@@ -1660,10 +1660,11 @@ async fn multipart_complete_uses_reported_parts_not_empty_list() {
     // extensions -- exercises `handlers::report_multipart_part` (token
     // verification, path-param binding, JSON decoding) for real, not just
     // the domain method.
-    // P2 0.1 remaining: `report_multipart_part` now also requires a
-    // `FinalizeAuth` extension. `None` reproduces this test's pre-existing
-    // behavior (no internal-secret gate configured, token-only trust model).
-    let finalize_auth = Arc::new(handlers::FinalizeAuth::new(None));
+    // `report_multipart_part` also requires a `FinalizeAuth` extension and a
+    // matching `x-fs-internal-token` header (the credential is mandatory).
+    let finalize_auth = Arc::new(handlers::FinalizeAuth::new(
+        "test-internal-secret".to_owned(),
+    ));
 
     let router = Router::new()
         .route(
@@ -1725,6 +1726,7 @@ async fn multipart_complete_uses_reported_parts_not_empty_list() {
             .uri(uri)
             .header("content-type", "application/json")
             .header("x-fs-token", token)
+            .header("x-fs-internal-token", "test-internal-secret")
             .body(Body::from(serde_json::to_vec(&body).unwrap()))
             .unwrap();
 
@@ -1855,10 +1857,11 @@ async fn report_part_rejects_forged_size() {
     let part = &plan.parts[0];
     let planned_size = i64::try_from(part.size).unwrap();
 
-    // P2 0.1 remaining: `report_multipart_part` now also requires a
-    // `FinalizeAuth` extension. `None` reproduces this test's pre-existing
-    // behavior (no internal-secret gate configured, token-only trust model).
-    let finalize_auth = Arc::new(handlers::FinalizeAuth::new(None));
+    // `report_multipart_part` also requires a `FinalizeAuth` extension and a
+    // matching `x-fs-internal-token` header (the credential is mandatory).
+    let finalize_auth = Arc::new(handlers::FinalizeAuth::new(
+        "test-internal-secret".to_owned(),
+    ));
 
     let router = Router::new()
         .route(
@@ -1889,6 +1892,7 @@ async fn report_part_rejects_forged_size() {
         .uri(uri)
         .header("content-type", "application/json")
         .header("x-fs-token", token)
+        .header("x-fs-internal-token", "test-internal-secret")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
 
@@ -2062,6 +2066,9 @@ impl StorageBackend for CompleteCallCountingBackend {
     }
     async fn get_range(&self, path: &str, range: ByteRange) -> Result<Bytes, DomainError> {
         self.inner.get_range(path, range).await
+    }
+    async fn size(&self, path: &str) -> Result<u64, DomainError> {
+        self.inner.size(path).await
     }
     async fn delete(&self, path: &str) -> Result<(), DomainError> {
         self.inner.delete(path).await

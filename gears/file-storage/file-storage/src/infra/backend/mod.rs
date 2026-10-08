@@ -81,7 +81,7 @@ pub struct BackendCapabilities {
     pub multipart_native: bool,
     /// Server-side encryption at rest (P3).
     pub encryption_native: bool,
-    /// Native byte-range reads (otherwise `FileStorage` slices after a full read).
+    /// Native byte-range reads. Every backend implements them, so this is `true` for all.
     pub range_native: bool,
     /// Internal-only presigned URLs (backend-to-backend tooling); never exposed.
     pub presigned_url_internal: bool,
@@ -148,17 +148,14 @@ pub trait StorageBackend: Send + Sync {
     async fn get(&self, path: &str) -> Result<Bytes, DomainError>;
 
     /// Stream the blob at `path` in chunks, without necessarily buffering the
-    /// whole object in memory at once. Used by `finalize_upload`'s read-back
-    /// verification (`cpt-cf-file-storage-fr-backend-abstraction`,
-    /// memory-safety fix mirroring `put_stream`'s streaming-write bound) to
-    /// recompute the actual size/hash/MIME-sniff-prefix from the real stored
-    /// bytes without re-inflating a potentially huge object into memory.
+    /// whole object in memory at once (`cpt-cf-file-storage-fr-backend-abstraction`),
+    /// so a potentially huge object is never re-inflated into memory.
     ///
     /// The default implementation falls back to `get`, yielding the whole
     /// blob as a single chunk (`futures::stream::once`) — still correct, just
     /// not memory-bounded — so every backend that hasn't been upgraded to a
     /// true streaming read stays correct; backends for which unbounded memory
-    /// use during a read-back is a real concern (e.g. `LocalFsBackend`,
+    /// use during a read is a real concern (e.g. `LocalFsBackend`,
     /// `S3Backend`) should override this method.
     async fn get_stream(
         &self,
@@ -170,33 +167,18 @@ pub trait StorageBackend: Send + Sync {
         Ok(stream)
     }
 
-    /// Read a byte range of the blob at `path`. Default impl reads the whole
-    /// blob then slices; range-native backends should override.
-    async fn get_range(&self, path: &str, range: ByteRange) -> Result<Bytes, DomainError> {
-        let full = self.get(path).await?;
-        let total = full.len() as u64;
-        match range.resolve(total) {
-            Some((start, end)) => {
-                let s = usize::try_from(start).unwrap_or(usize::MAX);
-                let e = usize::try_from(end).unwrap_or(usize::MAX);
-                Ok(full.slice(s..=e.min(full.len().saturating_sub(1))))
-            }
-            None => Err(DomainError::validation("range", "unsatisfiable byte range")),
-        }
-    }
+    /// Read a byte range of the blob at `path`. Every backend must implement
+    /// this natively (a ranged read that never materializes the whole blob);
+    /// there is no whole-blob fallback.
+    async fn get_range(&self, path: &str, range: ByteRange) -> Result<Bytes, DomainError>;
 
-    /// The total length in bytes of the blob at `path`, without necessarily
-    /// reading its content. Range-aware callers (e.g. the sidecar's
-    /// `download` handler, P2 1.11) use this to resolve `Range` requests
-    /// against the actual blob length and to build a correct `Content-Range`
-    /// header, without materializing the whole blob first.
-    ///
-    /// The default implementation falls back to `get`, so only backends with
-    /// a cheaper standalone stat (e.g. `LocalFsBackend`'s filesystem
-    /// metadata) need to override it.
-    async fn size(&self, path: &str) -> Result<u64, DomainError> {
-        Ok(self.get(path).await?.len() as u64)
-    }
+    /// The total length in bytes of the blob at `path`, without reading its
+    /// content. Range-aware callers (e.g. the sidecar's `download` handler,
+    /// P2 1.11) use this to resolve `Range` requests against the actual blob
+    /// length and to build a correct `Content-Range` header, and finalize
+    /// uses it to check the reported size. Every backend must implement this
+    /// natively (metadata-only length); there is no whole-blob fallback.
+    async fn size(&self, path: &str) -> Result<u64, DomainError>;
 
     /// Delete the blob at `path`. Missing blobs are treated as success
     /// (idempotent delete).

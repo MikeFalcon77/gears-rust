@@ -2253,6 +2253,18 @@ impl StorageBackend for RacingBackend {
         self.inner.get(path).await
     }
 
+    async fn get_range(
+        &self,
+        path: &str,
+        range: file_storage_sdk::ByteRange,
+    ) -> Result<Bytes, DomainError> {
+        self.inner.get_range(path, range).await
+    }
+
+    async fn size(&self, path: &str) -> Result<u64, DomainError> {
+        self.inner.size(path).await
+    }
+
     async fn delete(&self, path: &str) -> Result<(), DomainError> {
         self.inner.delete(path).await
     }

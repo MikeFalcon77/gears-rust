@@ -1,12 +1,11 @@
-//! Tests for finalize-time server-side re-verification of size/hash (P2 0.1).
+//! Tests for finalize-time checks (P2 0.1).
 //!
 //! Both finalize entry points — the user-context `finalize_upload` and the
-//! token-authenticated `finalize_upload_by_token` — must never persist a
-//! `size`/`hash_value` that was not independently derived from the bytes
-//! actually present at the version's backend path. A finalize call for a
-//! version with no prior successful `PUT`, or with a claimed size/hash that
-//! doesn't match the real blob, must be rejected and must leave the version
-//! row `pending`.
+//! token-authenticated `finalize_upload_by_token` — trust the size and hash
+//! reported by the (authenticated) sidecar but still check the claimed size
+//! against the stored object's length. A finalize call for a version with no
+//! prior successful `PUT`, or with a claimed size that doesn't match the
+//! stored object, must be rejected and must leave the version row `pending`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
@@ -249,10 +248,13 @@ async fn finalize_size_mismatch_is_rejected() {
     assert_eq!(version.status, VersionStatus::Pending);
 }
 
-// -- 3. finalize_upload: hash mismatch is rejected ---------------------------
+// -- 3. finalize_upload: the reported hash is what gets persisted ------------
 
 #[tokio::test]
-async fn finalize_hash_mismatch_is_rejected() {
+async fn finalize_persists_reported_hash() {
+    // The finalize callback is authenticated by the internal credential and
+    // the sidecar measured the hash while streaming, so finalize trusts the
+    // reported hash instead of re-reading the object to recompute it.
     let (svc, backend, store) = build_service().await;
     let ctx = ctx(Uuid::now_v7());
     let ticket = svc.create_file(&ctx, new_file(), None).await.unwrap();
@@ -263,21 +265,25 @@ async fn finalize_hash_mismatch_is_rejected() {
         .await
         .unwrap();
 
-    let err = svc
-        .finalize_upload(&ctx, ticket.file_id, ticket.version_id, 5, vec![0u8; 32])
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, DomainError::HashMismatch { .. }),
-        "expected HashMismatch, got {err:?}"
-    );
+    let reported_hash = vec![0xabu8; 32];
+    svc.finalize_upload(
+        &ctx,
+        ticket.file_id,
+        ticket.version_id,
+        5,
+        reported_hash.clone(),
+    )
+    .await
+    .unwrap();
 
     let version = store
         .get_version(ticket.file_id, ticket.version_id)
         .await
         .unwrap()
-        .expect("version row must still exist");
-    assert_eq!(version.status, VersionStatus::Pending);
+        .expect("version row must exist");
+    assert_eq!(version.status, VersionStatus::Available);
+    assert_eq!(version.size, 5);
+    assert_eq!(version.hash_value, reported_hash);
 }
 
 // -- 4. finalize_upload: matching size+hash succeeds, persists read-back ----
@@ -311,11 +317,8 @@ async fn finalize_matching_size_and_hash_succeeds() {
         .unwrap()
         .expect("version row must exist");
     assert_eq!(version.status, VersionStatus::Available);
-    // `finalize_upload` persists the caller's `hash_value` only after
-    // `Store::verify_content_hash` has proven it byte-for-byte equal to
-    // `sha256` of the read-back blob, so this independently recomputed hash
-    // must match the persisted value regardless of which of the two
-    // (guaranteed-identical) values the implementation happens to persist.
+    // The reported hash is persisted as-is; here it is the true SHA-256 of
+    // the stored bytes, so it equals an independent recomputation.
     let independently_recomputed = hash::sha256(&known_bytes);
     assert_eq!(version.size, true_size);
     assert_eq!(version.hash_value, independently_recomputed);
@@ -706,7 +709,7 @@ async fn finalize_with_internal_secret_required_rejects_missing_header() {
         .expect("issue token");
 
     let verifier = Arc::new(svc.verifier());
-    let finalize_auth = Arc::new(FinalizeAuth::new(Some("interim-shared-secret".to_owned())));
+    let finalize_auth = Arc::new(FinalizeAuth::new("interim-shared-secret".to_owned()));
     // Deliberately no `x-fs-internal-token` header.
     let headers = headers_with_token(&token);
 
@@ -770,7 +773,7 @@ async fn finalize_with_internal_secret_required_accepts_matching_header() {
 
     let verifier = Arc::new(svc.verifier());
     let secret = "interim-shared-secret";
-    let finalize_auth = Arc::new(FinalizeAuth::new(Some(secret.to_owned())));
+    let finalize_auth = Arc::new(FinalizeAuth::new(secret.to_owned()));
 
     let mut headers = headers_with_token(&token);
     headers.insert(
@@ -843,7 +846,7 @@ async fn report_part_with_internal_secret_required_rejects_missing_header() {
         .expect("issue token");
 
     let verifier = Arc::new(svc.verifier());
-    let finalize_auth = Arc::new(FinalizeAuth::new(Some("interim-shared-secret".to_owned())));
+    let finalize_auth = Arc::new(FinalizeAuth::new("interim-shared-secret".to_owned()));
     // Deliberately no `x-fs-internal-token` header.
     let headers = headers_with_token(&token);
 

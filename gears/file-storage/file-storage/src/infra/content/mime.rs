@@ -34,20 +34,20 @@ fn mime_equivalent(a: &str, b: &str) -> bool {
     essence(a) == essence(b)
 }
 
-/// Cap on how many leading bytes of the read-back blob are captured for MIME
+/// Cap on how many leading bytes of the stored blob are captured for MIME
 /// sniffing (`cpt-cf-file-storage-fr-content-type-validation`). The vendored
 /// `infer` crate's deepest matcher (a legacy RAR-archive signature) inspects
 /// byte offset 261; every other matcher looks at far fewer bytes. 8 KiB is
-/// comfortably more than any matcher needs, so truncating the read-back to
+/// comfortably more than any matcher needs, so capturing only
 /// this prefix can never change a sniff result.
 ///
-/// Shared by both finalize paths that sniff a read-back prefix: the
+/// Shared by both finalize paths that sniff a stored-object prefix: the
 /// single-part `finalize_upload`/`finalize_upload_by_token`
 /// (`src/domain/service/write.rs`) and the multipart-complete path
 /// (`src/domain/multipart_service.rs`, P2 remediation item 1.10).
 pub(crate) const MIME_SNIFF_PREFIX_BYTES: usize = 8 * 1024;
 
-/// Validate the read-back blob's actual bytes against the version's declared
+/// Validate the stored blob's actual bytes against the version's declared
 /// MIME type, reusing [`validate`]'s magic-byte sniffing (the same logic the
 /// in-process data plane runs at ingress) rather than re-implementing it.
 ///
@@ -73,7 +73,7 @@ pub(crate) fn validate_and_resolve_mime(
 }
 
 /// Re-enforce the per-MIME size ceiling against the **validated** type. The
-/// declared-type check runs earlier (before the blob is even read back); this
+/// declared-type check runs earlier (before the blob is even checked); this
 /// second check closes the gap where a declared type with a generous — or
 /// unrestricted — ceiling would otherwise let bytes of a more tightly
 /// restricted true type slip through under it.

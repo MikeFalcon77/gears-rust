@@ -41,7 +41,7 @@ fn test_state() -> SidecarState {
         verifier: std::sync::Arc::new(issuer.verifier()),
         backends,
         control_base_url: String::new(),
-        internal_token: None,
+        internal_token: "test-internal-token".to_owned(),
         http: reqwest::Client::new(),
         metrics: Arc::new(NoopMetrics),
     }
@@ -78,7 +78,7 @@ async fn sidecar_readyz_returns_200_when_backends_ready() {
         verifier: Arc::new(issuer.verifier()),
         backends,
         control_base_url: String::new(),
-        internal_token: None,
+        internal_token: "test-internal-token".to_owned(),
         http: reqwest::Client::new(),
         metrics: Arc::new(NoopMetrics),
     };
@@ -122,7 +122,7 @@ async fn sidecar_readyz_returns_503_when_backend_root_missing() {
         verifier: Arc::new(issuer.verifier()),
         backends,
         control_base_url: String::new(),
-        internal_token: None,
+        internal_token: "test-internal-token".to_owned(),
         http: reqwest::Client::new(),
         metrics: Arc::new(NoopMetrics),
     };
@@ -326,7 +326,7 @@ fn test_download_state() -> (SidecarState, Issuer, Arc<InMemoryBackend>) {
         verifier: Arc::new(issuer.verifier()),
         backends,
         control_base_url: String::new(),
-        internal_token: None,
+        internal_token: "test-internal-token".to_owned(),
         http: reqwest::Client::new(),
         metrics: Arc::new(NoopMetrics),
     };
@@ -706,14 +706,13 @@ async fn finalize_failure_does_not_leak_control_plane_url() {
     );
 }
 
-/// P2 0.1 remaining: when `SidecarState::internal_token` (the
-/// `FS_SIDECAR_INTERNAL_TOKEN`-derived field) is set, the callback request
+/// P2 0.1 remaining: the callback request
 /// builder (`post_with_retry`, shared by `finalize_with_control_plane` and
-/// `report_part_with_control_plane`) must attach it as the
+/// `report_part_with_control_plane`) must attach the configured token as the
 /// `x-fs-internal-token` header. Captured off a raw mock TCP listener since
 /// this is a wire-level assertion, not a `reqwest`-side one.
 #[tokio::test]
-async fn finalize_callback_sends_internal_token_header_when_configured() {
+async fn finalize_callback_sends_internal_token_header() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind mock control plane");
@@ -735,7 +734,7 @@ async fn finalize_callback_sends_internal_token_header_when_configured() {
 
     let mut state = test_state();
     state.control_base_url = format!("http://{addr}");
-    state.internal_token = Some("interim-shared-secret".to_owned());
+    state.internal_token = "interim-shared-secret".to_owned();
 
     let outcome = finalize_with_control_plane(
         &state,
@@ -758,57 +757,6 @@ async fn finalize_callback_sends_internal_token_header_when_configured() {
             .to_lowercase()
             .contains("x-fs-internal-token: interim-shared-secret"),
         "finalize callback must carry the configured x-fs-internal-token header: {request_text}"
-    );
-}
-
-/// Companion negative control: with `internal_token` unset (the default —
-/// no `FS_SIDECAR_INTERNAL_TOKEN` configured), the callback must not send the
-/// header at all, so it works unmodified against a control plane that has
-/// the internal-credential check disabled.
-#[tokio::test]
-async fn finalize_callback_omits_internal_token_header_when_not_configured() {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind mock control plane");
-    let addr = listener.local_addr().expect("local addr");
-
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(async move {
-        if let Ok((mut stream, _)) = listener.accept().await {
-            let mut buf = [0u8; 4096];
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            let request_text = String::from_utf8_lossy(&buf[..n]).into_owned();
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
-                .await
-                .ok();
-            tx.send(request_text).ok();
-        }
-    });
-
-    // `test_state()` leaves `internal_token: None`.
-    let mut state = test_state();
-    state.control_base_url = format!("http://{addr}");
-
-    let outcome = finalize_with_control_plane(
-        &state,
-        "dummy-token",
-        "test-request-id",
-        Uuid::nil(),
-        Uuid::nil(),
-        0,
-        "deadbeef",
-    )
-    .await;
-    assert!(
-        outcome.is_ok(),
-        "finalize must succeed against the mock 200 OK response"
-    );
-
-    let request_text = rx.await.expect("mock control plane must receive a request");
-    assert!(
-        !request_text.to_lowercase().contains("x-fs-internal-token"),
-        "finalize callback must not send x-fs-internal-token when unconfigured: {request_text}"
     );
 }
 
@@ -899,7 +847,7 @@ async fn sidecar_multipart_native_backend_dispatches_to_upload_part() {
         verifier: Arc::new(issuer.verifier()),
         backends,
         control_base_url: String::new(),
-        internal_token: None,
+        internal_token: "test-internal-token".to_owned(),
         http: reqwest::Client::new(),
         metrics: Arc::new(NoopMetrics),
     };
@@ -1151,7 +1099,7 @@ async fn sidecar_resolves_backend_by_claims_backend_id() {
         verifier: Arc::new(issuer.verifier()),
         backends,
         control_base_url: String::new(),
-        internal_token: None,
+        internal_token: "test-internal-token".to_owned(),
         http: reqwest::Client::new(),
         metrics: Arc::new(NoopMetrics),
     };

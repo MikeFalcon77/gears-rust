@@ -92,15 +92,16 @@ impl StorageBackend for CountingBackend {
     // Not counted: a bounded range read is not a "whole-object read" (see the
     // struct doc comment above) -- unlike `get`/`get_stream`, it never
     // re-reads the entire assembled object, so it is not what AC2 guards
-    // against. Without this override the trait's *default* `get_range`
-    // (`full = self.get(path).await?`) would dispatch back through this
-    // wrapper's counted `get` and inflate the counter for what is, on every
-    // real backend (`LocalFsBackend`, `S3Backend`), a small native
-    // range-limited fetch. P2 remediation item 1.10 added exactly this call
+    // against. Delegating straight to the inner backend keeps the counter
+    // honest for what is, on every backend, a small native range-limited
+    // fetch. P2 remediation item 1.10 added exactly this call
     // (a bounded MIME-sniff prefix read) to `complete_multipart_upload`,
     // after this file's AC2 was written to prove "no whole-object re-read".
     async fn get_range(&self, path: &str, range: ByteRange) -> Result<Bytes, DomainError> {
         self.inner.get_range(path, range).await
+    }
+    async fn size(&self, path: &str) -> Result<u64, DomainError> {
+        self.inner.size(path).await
     }
     async fn delete(&self, path: &str) -> Result<(), DomainError> {
         self.inner.delete(path).await

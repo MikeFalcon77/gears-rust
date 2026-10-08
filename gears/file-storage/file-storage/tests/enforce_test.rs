@@ -393,10 +393,11 @@ async fn finalize_via_router_with_hash_len(hash_byte_len: usize) -> (StatusCode,
         + "fs-token=".len();
     let token = ticket.upload_url[token_start..].to_owned();
 
-    // P2 0.1 remaining: `finalize_version` now also requires a `FinalizeAuth`
-    // extension. `None` reproduces this test's pre-existing behavior (no
-    // internal-secret gate configured, token-only trust model).
-    let finalize_auth = Arc::new(handlers::FinalizeAuth::new(None));
+    // `finalize_version` also requires a `FinalizeAuth` extension and a
+    // matching `x-fs-internal-token` header (the credential is mandatory).
+    let finalize_auth = Arc::new(handlers::FinalizeAuth::new(
+        "test-internal-secret".to_owned(),
+    ));
 
     let router = Router::new()
         .route(
@@ -420,6 +421,7 @@ async fn finalize_via_router_with_hash_len(hash_byte_len: usize) -> (StatusCode,
         .uri(uri)
         .header("content-type", "application/json")
         .header("x-fs-token", token)
+        .header("x-fs-internal-token", "test-internal-secret")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap();
 
