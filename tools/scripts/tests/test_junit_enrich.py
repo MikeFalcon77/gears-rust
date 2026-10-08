@@ -101,6 +101,19 @@ class EnrichPytestTest(unittest.TestCase):
         self.path = tmp.name
         self.addCleanup(Path(self.path).unlink)
 
+    def test_helper_in_the_test_file_resolves_to_the_call_in_the_test(self) -> None:
+        text = (
+            "testing/e2e/suites/x/test_probe.py:13: in test_fails\n"
+            "    _expect_ok(503)\n"
+            "testing/e2e/suites/x/test_probe.py:5: in _expect_ok\n"
+            "    assert status == 200\n"
+            "E   AssertionError\n"
+        )
+        self.assertEqual(
+            junit_enrich.python_location(text, "test_fails[param-1]"),
+            ("testing/e2e/suites/x/test_probe.py", "13"),
+        )
+
     def test_location_is_the_test_file_line_and_message_is_kept(self) -> None:
         self.assertEqual(junit_enrich.enrich(self.path), 2)
         cases = {c.get("name"): c for c in ET.parse(self.path).iter("testcase")}

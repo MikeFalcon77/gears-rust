@@ -23,8 +23,9 @@ rewrites, in place, each failing <testcase> whose output has a panic location:
 
 pytest's reports already carry the assertion in `message`, but no location;
 for those only `file`/`line` are set, from the traceback in the <failure>
-body: the deepest frame in a test file (test_*.py / *_test.py), else the
-deepest frame inside the repository. Paths come out as pytest printed them,
+body: the frame running the test function itself, else the deepest frame in
+a test file (test_*.py / *_test.py), else the deepest frame inside the
+repository. Paths come out as pytest printed them,
 relative to its working directory -- the repository root in CI.
 
 Anything it cannot recognise (a timeout, a crash without a panic) is left
@@ -57,27 +58,32 @@ PANIC_RE = re.compile(
 )
 
 # `path/to/file.py:LINE: ...` -- a frame in pytest's --tb=short/long output.
-PY_FRAME_RE = re.compile(r"^(?P<file>[^\s:]+\.py):(?P<line>\d+): ", re.M)
+PY_FRAME_RE = re.compile(r"^(?P<file>[^\s:]+\.py):(?P<line>\d+): (?:in (?P<func>\w+))?", re.M)
 
 # Keeps the one-line summaries in the reporter readable; the full text stays
 # in the <failure> body.
 MAX_MESSAGE = 1000
 
 
-def python_location(text: str) -> tuple[str, str] | None:
+def python_location(text: str, test_name: str = "") -> tuple[str, str] | None:
+    # Parametrized ids (`test_x[a-b]`) run the plain function `test_x`.
+    func = test_name.split("[", 1)[0]
     frames = [
-        (m.group("file"), m.group("line"))
+        (m.group("file"), m.group("line"), m.group("func"))
         for m in PY_FRAME_RE.finditer(text)
         # Outside the repository (site-packages, stdlib): nothing to link to.
         if not m.group("file").startswith(("/", "..")) and "site-packages" not in m.group("file")
     ]
     if not frames:
         return None
+    own = [f for f in frames if func and f[2] == func]
+    if own:
+        return own[-1][:2]
     in_tests = [
         f for f in frames
         if f[0].rsplit("/", 1)[-1].startswith("test_") or f[0].endswith("_test.py")
     ]
-    return (in_tests or frames)[-1]
+    return (in_tests or frames)[-1][:2]
 
 
 def enrich(path: str) -> int:
@@ -91,7 +97,7 @@ def enrich(path: str) -> int:
             continue
         m = PANIC_RE.search(failure.text)
         if m is None:
-            loc = python_location(failure.text)
+            loc = python_location(failure.text, case.get("name", ""))
             if loc is not None:
                 case.set("file", loc[0])
                 case.set("line", loc[1])
@@ -204,6 +210,10 @@ def publish(path: str) -> None:
 
 
 def main(argv: list[str]) -> int:
+    # Windows runners default to a legacy code page; workflow commands are
+    # read back as UTF-8 (test names carry "›").
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     github = "--github" in argv
     paths = [a for a in argv if a != "--github"]
     if not paths:
