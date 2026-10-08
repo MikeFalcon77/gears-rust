@@ -16,7 +16,7 @@ name: Test Report
 
 on:
   workflow_run:
-    workflows: ["CI", "e2e"]
+    workflows: ["CI", "e2e", "Report Sandbox"]  # FORK-ONLY: sandbox
     types: [completed]
 
 permissions:

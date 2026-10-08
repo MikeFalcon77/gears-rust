@@ -1,0 +1,66 @@
+name: Report Sandbox
+
+# FORK-ONLY experiment harness for test-report.yml: uploads fixed JUnit files
+# in seconds so the reporter can be iterated on without a full CI run.
+# Never port this to constructorfabric/gears-rust.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/report-sandbox/**'
+      - '.github/workflows/report-sandbox.yml'
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "What to upload"
+        type: choice
+        default: failures
+        options:
+          - failures   # rust + e2e reports with failing tests
+          - passing    # rust report, all green
+          - empty      # rust report with zero tests (fail-on-empty)
+          - none       # no artifacts at all (skipped test job)
+          - fail-job   # failures + the job itself fails, like real CI
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    env:
+      SCENARIO: ${{ inputs.scenario || 'failures' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Stage fixtures
+        run: |
+          mkdir -p out/rust out/e2e
+          case "$SCENARIO" in
+            failures|fail-job)
+              cp .github/report-sandbox/rust-failures.xml out/rust/
+              cp .github/report-sandbox/e2e-failures.xml out/e2e/ ;;
+            passing) cp .github/report-sandbox/rust-passing.xml out/rust/ ;;
+            empty)   cp .github/report-sandbox/rust-empty.xml out/rust/ ;;
+            none)    ;;
+          esac
+          find out -type f
+
+      - if: ${{ hashFiles('out/rust/*.xml') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-tests-Sandbox
+          path: out/rust/*.xml
+
+      - if: ${{ hashFiles('out/e2e/*.xml') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-tests-sandbox
+          path: out/e2e/*.xml
+
+      - name: Fail like a red CI job
+        if: env.SCENARIO == 'fail-job'
+        run: exit 1

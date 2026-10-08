@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="2" skipped="0" failures="0" errors="0" time="0.003">
+    <testsuite name="cf-gears-toolkit-stable-hash::zz_junit_probe" tests="2" skipped="0" errors="0" failures="0">
+        <testcase name="probe_passes" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" time="0.002"/>
+        <testcase name="probe_passes_too" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" time="0.001"/>
+    </testsuite>
+</testsuites>
