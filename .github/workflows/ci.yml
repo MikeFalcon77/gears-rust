@@ -143,6 +143,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
+      # log into annotations on the failing line (job page and PR diff).
+      - name: Annotate Rust compiler errors
+        run: echo "::add-matcher::.github/rust-problem-matcher.json"
+
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
@@ -243,6 +248,11 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
+      # log into annotations on the failing line (job page and PR diff).
+      - name: Annotate Rust compiler errors
+        run: echo "::add-matcher::.github/rust-problem-matcher.json"
 
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -347,6 +357,11 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
+      # log into annotations on the failing line (job page and PR diff).
+      - name: Annotate Rust compiler errors
+        run: echo "::add-matcher::.github/rust-problem-matcher.json"
 
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -1004,6 +1019,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
+      # log into annotations on the failing line (job page and PR diff).
+      - name: Annotate Rust compiler errors
+        run: echo "::add-matcher::.github/rust-problem-matcher.json"
+
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
@@ -1052,10 +1072,14 @@ jobs:
       # inherits this step's CARGO_LLVM_COV_* env and accumulates into the same
       # session. Keep it in sync with `test-cluster-k8s`.
       - name: Coverage (lcov)
+        id: coverage
         env:
           RUSTFLAGS: "-C debuginfo=0 --cfg coverage_nightly"
           CARGO_LLVM_COV_TARGET_DIR: llvm-cov-target
           CARGO_LLVM_COV_BUILD_DIR: llvm-cov-build
+          # nextest reads this directly (`cargo llvm-cov --profile` is cargo's
+          # build profile, not nextest's): run every test, write JUnit.
+          NEXTEST_PROFILE: ci
         run: |
           cargo llvm-cov clean --workspace
           # Pass 1: whole workspace, default features. Accumulate, don't report.
@@ -1070,6 +1094,21 @@ jobs:
           make coverage-cluster-k8s
           # Merge into the single report that gets uploaded.
           cargo llvm-cov report --lcov --output-path lcov.info
+
+      # The passes stop at the first failing one, so the JUnit report left
+      # behind is that pass's. A failing test is reported by the test jobs
+      # too; this puts it on this job's page as well, where it was clicked.
+      - name: Annotate failing tests
+        if: ${{ failure() && steps.coverage.outcome == 'failure' }}
+        shell: bash
+        run: |
+          # cargo-llvm-cov decides the exact target dir; look for it.
+          report=$(find llvm-cov-target llvm-cov-build -path '*/nextest/ci/junit.xml' 2>/dev/null | head -1)
+          if [ -n "$report" ]; then
+            python3 tools/scripts/junit_enrich.py --github "$report"
+          else
+            echo "No JUnit report: the failure is not a test failure (see the step above)."
+          fi
 
       # Upload LCOV report as a GitHub Actions artifact so it is always
       # available, even when Codecov is unavailable or rejects the upload.
@@ -1105,6 +1144,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
+      # log into annotations on the failing line (job page and PR diff).
+      - name: Annotate Rust compiler errors
+        run: echo "::add-matcher::.github/rust-problem-matcher.json"
 
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21

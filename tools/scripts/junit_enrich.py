@@ -40,7 +40,9 @@ surfaced in the job that ran the tests, without waiting for test-report.yml:
   shows at most 10 per step), visible at the top of the job page and on the
   PR diff -- workflow commands need no token, so fork PRs get them too;
 - a block in $GITHUB_STEP_SUMMARY: pass/fail/skip counts and every failing
-  test with a link to its source line and its message.
+  test with a link to its source line and its message;
+- the same list as plain text at the end of the step's log, which is where
+  GitHub scrolls a failed step to when the job is opened.
 
 Usage: junit_enrich.py [--github] REPORT.xml [REPORT.xml ...]
 """
@@ -195,16 +197,29 @@ def summary(report: str, counts: dict[str, int], failures: list[dict[str, str]])
     return "\n".join(out) + "\n"
 
 
+def log_block(report: str, counts: dict[str, int], failures: list[dict[str, str]]) -> str:
+    total = counts["passed"] + counts["failed"]
+    out = ["", f"──── Failed tests in {report}: {counts['failed']} of {total} ────"]
+    for f in failures:
+        out.append(f"✗ {f['test']}")
+        if f["file"]:
+            out.append(f"    at {f['file']}:{f['line']}" if f["line"] else f"    at {f['file']}")
+        out += [f"    {l}" for l in f["message"].splitlines()]
+    return "\n".join(out) + "\n"
+
+
 def publish(path: str) -> None:
-    """Annotations on stdout and a block in the step summary for one report."""
+    """Annotations, the log block and the step summary for one report."""
     counts, failures = collect(path)
+    report = os.path.splitext(os.path.basename(path))[0]
     for failure in failures[:MAX_ANNOTATIONS]:
         print(annotation(failure))
     if len(failures) > MAX_ANNOTATIONS:
         print(f"::notice::{len(failures) - MAX_ANNOTATIONS} more failing test(s) in {path}; see the job summary")
+    if failures:
+        print(log_block(report, counts, failures), end="")
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_file:
-        report = os.path.splitext(os.path.basename(path))[0]
         with open(summary_file, "a", encoding="utf-8") as fh:
             fh.write(summary(report, counts, failures))
 
