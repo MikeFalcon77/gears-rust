@@ -49,10 +49,13 @@ jobs:
           echo "e2e=$(grep -c '^e2e-tests-' <<<"$names" || true)" >> "$GITHUB_OUTPUT"
 
       # One Check Run per artifact: rust-tests-Linux|Windows|macOS|integration.
-      # fail-on-error is off because the check's own conclusion already says
-      # `failure`; failing this workflow too would only add a duplicate red X.
-      # fail-on-empty stays on: an uploaded report with no tests in it is a
-      # broken lane, not a pass.
+      # In dorny v3 both switches below are load-bearing, not cosmetic:
+      # - fail-on-error also sets the Check Run's conclusion; with it off, a
+      #   report full of failures is published as a green check.
+      # - use-actions-summary replaces the Check Run with a job summary
+      #   instead of adding one, so it must stay off to get a check at all.
+      # fail-on-empty: an uploaded report with no tests in it is a broken
+      # lane, not a pass.
       - name: Publish Rust test results
         if: steps.find.outputs.rust != '0'
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
@@ -62,13 +65,14 @@ jobs:
           path: '**/*.xml'
           reporter: java-junit
           list-tests: failed
-          fail-on-error: false
+          fail-on-error: true
           fail-on-empty: true
-          use-actions-summary: true
+          use-actions-summary: false
 
-      # e2e-tests-local (PR and nightly) and e2e-tests-docker.
+      # e2e-tests-local (PR and nightly) and e2e-tests-docker. `!cancelled()`:
+      # a red Rust report above fails its step and must not skip this one.
       - name: Publish E2E test results
-        if: steps.find.outputs.e2e != '0'
+        if: ${{ !cancelled() && steps.find.outputs.e2e != '0' }}
         uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
         with:
           artifact: /e2e-tests-(.*)/
@@ -76,6 +80,6 @@ jobs:
           path: '**/*.xml'
           reporter: java-junit
           list-tests: failed
-          fail-on-error: false
+          fail-on-error: true
           fail-on-empty: true
-          use-actions-summary: true
+          use-actions-summary: false
