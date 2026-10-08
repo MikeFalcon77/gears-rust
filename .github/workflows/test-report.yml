@@ -54,7 +54,9 @@ jobs:
           shopt -s nullglob
           artifacts=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
             --jq '.artifacts[] | select(.expired | not) | .name')
-          for artifact in $artifacts; do
+          # Read line by line: an unquoted `for` would glob-expand a name.
+          while IFS= read -r artifact; do
+            [ -n "$artifact" ] || continue
             case "$artifact" in
               rust-tests-*) title="Rust Tests / ${artifact#rust-tests-}" ;;
               e2e-tests-*)  title="E2E / ${artifact#e2e-tests-}" ;;
@@ -74,11 +76,12 @@ jobs:
             fi
             paths+=("reports/$artifact/*.xml")
             names+=("$title")
-          done
+          done <<< "$artifacts"
           if [ ${#paths[@]} -gt 0 ]; then
+            eof="EOF_$(openssl rand -hex 8)"
             {
-              echo "paths<<EOF"; printf '%s\n' "${paths[@]}"; echo "EOF"
-              echo "names<<EOF"; printf '%s\n' "${names[@]}"; echo "EOF"
+              echo "paths<<$eof"; printf '%s\n' "${paths[@]}"; echo "$eof"
+              echo "names<<$eof"; printf '%s\n' "${names[@]}"; echo "$eof"
             } >> "$GITHUB_OUTPUT"
             printf 'Publishing: %s\n' "${names[@]}"
           else

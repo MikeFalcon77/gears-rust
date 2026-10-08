@@ -1087,9 +1087,10 @@ jobs:
         if: ${{ failure() && steps.coverage.outcome == 'failure' }}
         shell: bash
         run: |
-          # cargo-llvm-cov decides the exact target dir; look for it.
-          report=$(find llvm-cov-target llvm-cov-build -path '*/nextest/ci/junit.xml' 2>/dev/null | head -1)
-          if [ -n "$report" ]; then
+          # cargo-llvm-cov runs nextest with --target-dir set to
+          # CARGO_LLVM_COV_TARGET_DIR, so the ci profile writes here.
+          report=llvm-cov-target/nextest/ci/junit.xml
+          if [ -f "$report" ]; then
             python3 tools/scripts/junit_enrich.py --github "$report"
           else
             echo "No JUnit report: the failure is not a test failure (see the step above)."
