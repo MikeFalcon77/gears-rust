@@ -1,4 +1,4 @@
-//! FORK-ONLY probe for the JUnit -> GitHub Checks pipeline. Never merge upstream.
+// FORK-ONLY probe for the `JUnit` report pipeline. Never merge upstream.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
