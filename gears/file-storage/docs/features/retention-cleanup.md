@@ -37,7 +37,7 @@ Updated:  2026-07-08 by Constructor Tech
 
 ## 1. Feature Context
 
-- [x] `p2` - `cpt-cf-file-storage-feature-retention-cleanup`
+- [ ] `p2` - `cpt-cf-file-storage-feature-retention-cleanup`
 
 ### 1.1 Overview
 

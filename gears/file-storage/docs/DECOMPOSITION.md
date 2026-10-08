@@ -322,7 +322,7 @@ gear's code. It remains a planned P2 requirement (see PRD.md/DESIGN.md).
 
 ### 2.4 [Retention Rules & Cleanup Sweep](features/retention-cleanup.md) - MEDIUM
 
-- [x] `p2` - **ID**: `cpt-cf-file-storage-feature-retention-cleanup`
+- [ ] `p2` - **ID**: `cpt-cf-file-storage-feature-retention-cleanup`
 
 - **Type**: Core
 - **Phases**: Single-phase implementation
@@ -355,8 +355,8 @@ gear's code. It remains a planned P2 requirement (see PRD.md/DESIGN.md).
 
 - **Requirements Covered**:
 
-  - [x] `p2` - `cpt-cf-file-storage-fr-retention-policies`
-  - [x] `p2` - `cpt-cf-file-storage-fr-orphan-reconciliation`
+  - [ ] `p2` - `cpt-cf-file-storage-fr-retention-policies`
+  - [ ] `p2` - `cpt-cf-file-storage-fr-orphan-reconciliation`
 
 - **Design Principles Covered**:
 
