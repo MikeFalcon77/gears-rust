@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for junit_enrich.py (source locations for nextest JUnit).
+"""Unit tests for junit_enrich.py (source locations for nextest/pytest JUnit).
 
     python3 -m unittest discover -s tools/scripts/tests
 """
@@ -70,6 +70,44 @@ class EnrichTest(unittest.TestCase):
         first = Path(self.path).read_text(encoding="utf-8")
         junit_enrich.enrich(self.path)
         self.assertEqual(Path(self.path).read_text(encoding="utf-8"), first)
+
+
+# Shape of a pytest --tb=short report, run from the repository root.
+PYTEST_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="e2e-probe" tests="2" failures="2">
+  <testcase classname="suites.x.test_probe" name="test_direct" time="0.1">
+    <failure message="AssertionError: health endpoint not ready&#10;assert 503 == 200">testing/e2e/suites/x/test_probe.py:9: in test_direct
+    assert status == 200, "health endpoint not ready"
+E   AssertionError: health endpoint not ready</failure>
+  </testcase>
+  <testcase classname="suites.x.test_probe" name="test_via_helper" time="0.1">
+    <failure message="AssertionError: bad status 500">testing/e2e/suites/x/test_probe.py:17: in test_via_helper
+    check(500)
+testing/e2e/helpers/http.py:2: in check
+    assert v == 200, f"bad status {v}"
+/usr/lib/python3/site-packages/requests/api.py:59: in request
+E   AssertionError: bad status 500</failure>
+  </testcase>
+</testsuite></testsuites>
+"""
+
+
+class EnrichPytestTest(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-8")
+        tmp.write(PYTEST_REPORT)
+        tmp.close()
+        self.path = tmp.name
+        self.addCleanup(Path(self.path).unlink)
+
+    def test_location_is_the_test_file_line_and_message_is_kept(self) -> None:
+        self.assertEqual(junit_enrich.enrich(self.path), 2)
+        cases = {c.get("name"): c for c in ET.parse(self.path).iter("testcase")}
+        direct, helper = cases["test_direct"], cases["test_via_helper"]
+        self.assertEqual((direct.get("file"), direct.get("line")), ("testing/e2e/suites/x/test_probe.py", "9"))
+        # The call site in the test, not the helper or a third-party frame.
+        self.assertEqual((helper.get("file"), helper.get("line")), ("testing/e2e/suites/x/test_probe.py", "17"))
+        self.assertEqual(helper.find("failure").get("message"), "AssertionError: bad status 500")
 
 
 if __name__ == "__main__":

@@ -1,15 +1,16 @@
 name: Test Report
 
 # Publishes the JUnit reports that `CI` (nextest) and `e2e` (pytest) upload as
-# artifacts, as GitHub Check Runs plus an Actions summary: failing test names,
-# assertion messages and captured output, without reading the job logs.
+# artifacts, as one GitHub Check Run per artifact: failing test names,
+# assertion messages, and annotations on the failing source line (the reports
+# carry file/line -- see tools/scripts/junit_enrich.py).
 #
 # Why a separate workflow: those workflows run on `pull_request`, and a PR from
 # a fork gets a read-only token there, so it cannot create Check Runs. A
 # `workflow_run` workflow always runs this file from the default branch with
 # the base repository's token. That is also why it must stay inert towards the
 # PR: no checkout, no PR code executed -- the downloaded XML is the only input,
-# and it is parsed as data by the reporter.
+# artifact names included, and both are treated as untrusted data.
 #
 # Visibility only: the CI and e2e jobs remain the gate. Do not make these
 # checks required in branch protection.
@@ -33,53 +34,77 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # A test job that was skipped (path filters) or died before its upload
-      # leaves no artifact. Publishing only what exists keeps a skipped job
-      # from turning into a "0 tests passed" check.
-      - name: Find test-result artifacts
-        id: find
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+      - name: Download test-result artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: '*-tests-*'
+          path: reports
+
+      # One check per artifact that exists: a test job that was skipped (path
+      # filters) uploads nothing and so gets no check, rather than a
+      # "0 tests passed" one. A report that exists but holds no tests is a
+      # broken lane; it gets no check either and fails this job below.
+      - name: Plan checks
+        id: plan
+        shell: bash
         run: |
-          names=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[].name')
-          printf 'Artifacts of run %s:\n%s\n' "$RUN_ID" "$names"
-          echo "rust=$(grep -c '^rust-tests-' <<<"$names" || true)" >> "$GITHUB_OUTPUT"
-          echo "e2e=$(grep -c '^e2e-tests-' <<<"$names" || true)" >> "$GITHUB_OUTPUT"
+          paths=() names=() empty=()
+          shopt -s nullglob
+          for dir in reports/*/; do
+            artifact=$(basename "$dir")
+            # Artifact names come from the triggering run; keep them to a
+            # plain charset before they reach a check name or an output.
+            if [[ ! "$artifact" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+              echo "::warning::skipping artifact with unexpected name"
+              continue
+            fi
+            case "$artifact" in
+              rust-tests-*) title="Rust Tests / ${artifact#rust-tests-}" ;;
+              e2e-tests-*)  title="E2E / ${artifact#e2e-tests-}" ;;
+              *) continue ;;
+            esac
+            files=("$dir"*.xml)
+            if [ ${#files[@]} -eq 0 ] || ! grep -q '<testcase' "${files[@]}"; then
+              empty+=("$title")
+              continue
+            fi
+            paths+=("reports/$artifact/*.xml")
+            names+=("$title")
+          done
+          if [ ${#paths[@]} -gt 0 ]; then
+            {
+              echo "paths<<EOF"; printf '%s\n' "${paths[@]}"; echo "EOF"
+              echo "names<<EOF"; printf '%s\n' "${names[@]}"; echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            printf 'Publishing: %s\n' "${names[@]}"
+          else
+            echo "No test reports to publish."
+          fi
+          echo "empty=${empty[*]}" >> "$GITHUB_OUTPUT"
 
-      # One Check Run per artifact: rust-tests-Linux|Windows|macOS|integration.
-      # In dorny v3 both switches below are load-bearing, not cosmetic:
-      # - fail-on-error also sets the Check Run's conclusion; with it off, a
-      #   report full of failures is published as a green check.
-      # - use-actions-summary replaces the Check Run with a job summary
-      #   instead of adding one, so it must stay off to get a check at all.
-      # fail-on-empty: an uploaded report with no tests in it is a broken
-      # lane, not a pass.
-      - name: Publish Rust test results
-        if: steps.find.outputs.rust != '0'
-        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
+      # check_name is matched to report_paths line by line, so each artifact
+      # becomes its own check with its own conclusion (failure iff a test in
+      # it failed). fail_on_failure additionally turns this job red, so a
+      # failing report is visible from the Actions tab too.
+      - name: Publish JUnit results
+        if: steps.plan.outputs.paths != ''
+        uses: mikepenz/action-junit-report@b7b80d7ac5b1da46d6aaff9fb57ad50d8453bcb3 # v6.6.0
         with:
-          artifact: /rust-tests-(.*)/
-          name: Rust Tests / $1
-          path: '**/*.xml'
-          reporter: java-junit
-          list-tests: failed
-          fail-on-error: true
-          fail-on-empty: true
-          use-actions-summary: false
+          report_paths: ${{ steps.plan.outputs.paths }}
+          check_name: ${{ steps.plan.outputs.names }}
+          commit: ${{ github.event.workflow_run.head_sha }}
+          check_title_template: '{{CLASS_NAME}} › {{TEST_NAME}}'
+          detailed_summary: true
+          flaky_summary: true
+          include_time_in_summary: true
+          fail_on_failure: true
 
-      # e2e-tests-local (PR and nightly) and e2e-tests-docker. `!cancelled()`:
-      # a red Rust report above fails its step and must not skip this one.
-      - name: Publish E2E test results
-        if: ${{ !cancelled() && steps.find.outputs.e2e != '0' }}
-        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
-        with:
-          artifact: /e2e-tests-(.*)/
-          name: E2E / $1
-          path: '**/*.xml'
-          reporter: java-junit
-          list-tests: failed
-          fail-on-error: true
-          fail-on-empty: true
-          use-actions-summary: false
+      - name: Report empty test reports
+        if: ${{ !cancelled() && steps.plan.outputs.empty != '' }}
+        env:
+          EMPTY: ${{ steps.plan.outputs.empty }}
+        run: |
+          echo "::error::Test report(s) without any test cases: $EMPTY"
+          exit 1
