@@ -1,12 +1,12 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='UTF-8'?>
 <testsuites name="nextest-run" tests="4" skipped="1" failures="2" errors="0" uuid="c4908070-b655-484f-b576-e4c5d185c2ea" timestamp="2026-10-08T15:06:02.420+03:00" time="0.003">
     <testsuite name="cf-gears-toolkit-stable-hash::zz_junit_probe" tests="4" skipped="1" errors="0" failures="2">
         <testcase name="probe_ignored" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" time="0.000">
-            <skipped message="Skipped: test does not match the run-ignored option"/>
+            <skipped message="Skipped: test does not match the run-ignored option" />
         </testcase>
-        <testcase name="probe_passes" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" timestamp="2026-10-08T15:06:02.421+03:00" time="0.002"/>
-        <testcase name="probe_fails_panic" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" timestamp="2026-10-08T15:06:02.421+03:00" time="0.002">
-            <failure message="thread &apos;probe_fails_panic&apos; (227115) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:11:5" type="test failure with exit code 101">thread &apos;probe_fails_panic&apos; (227115) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:11:5:
+        <testcase name="probe_passes" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" timestamp="2026-10-08T15:06:02.421+03:00" time="0.002" />
+        <testcase name="probe_fails_panic" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" timestamp="2026-10-08T15:06:02.421+03:00" time="0.002" file="libs/toolkit-stable-hash/tests/zz_junit_probe.rs" line="11">
+            <failure message="libs/toolkit-stable-hash/tests/zz_junit_probe.rs:11: explicit panic in probe" type="test failure with exit code 101">thread 'probe_fails_panic' (227115) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:11:5:
 explicit panic in probe
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace</failure>
             <system-out>
@@ -22,13 +22,13 @@ test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; 
 
 </system-out>
             <system-err>
-thread &apos;probe_fails_panic&apos; (227115) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:11:5:
+thread 'probe_fails_panic' (227115) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:11:5:
 explicit panic in probe
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 </system-err>
         </testcase>
-        <testcase name="probe_fails_assert_eq" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" timestamp="2026-10-08T15:06:02.420+03:00" time="0.003">
-            <failure message="thread &apos;probe_fails_assert_eq&apos; (227113) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:7:5" type="test failure with exit code 101">thread &apos;probe_fails_assert_eq&apos; (227113) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:7:5:
+        <testcase name="probe_fails_assert_eq" classname="cf-gears-toolkit-stable-hash::zz_junit_probe" timestamp="2026-10-08T15:06:02.420+03:00" time="0.003" file="libs/toolkit-stable-hash/tests/zz_junit_probe.rs" line="7">
+            <failure message="libs/toolkit-stable-hash/tests/zz_junit_probe.rs:7: assertion `left == right` failed: math is broken&#10;  left: 2&#10; right: 3" type="test failure with exit code 101">thread 'probe_fails_assert_eq' (227113) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:7:5:
 assertion `left == right` failed: math is broken
   left: 2
  right: 3
@@ -47,7 +47,7 @@ test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; 
 
 </system-out>
             <system-err>
-thread &apos;probe_fails_assert_eq&apos; (227113) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:7:5:
+thread 'probe_fails_assert_eq' (227113) panicked at libs/toolkit-stable-hash/tests/zz_junit_probe.rs:7:5:
 assertion `left == right` failed: math is broken
   left: 2
  right: 3
