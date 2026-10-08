@@ -95,7 +95,9 @@ comma := ,
 # this run's junit.xml to $(JUNIT_DIR)/<report-name>.xml -- also when tests
 # fail -- so sequential runs in one job don't overwrite each other's report.
 # The stale report is removed first: a run that fails to build must leave no
-# report rather than the previous run's. The exit code is nextest's.
+# report rather than the previous run's. The saved report is then given
+# source locations (tools/scripts/junit_enrich.py; system python3, no venv --
+# best effort, never fails the run). The exit code is nextest's.
 define nextest_run
 	@junit="$${CARGO_TARGET_DIR:-target}/nextest/$(NEXTEST_PROFILE)/junit.xml"; \
 	rm -f "$$junit"; \
@@ -103,6 +105,8 @@ define nextest_run
 	if [ -n "$(JUNIT_DIR)" ]; then \
 		mkdir -p "$(JUNIT_DIR)"; \
 		if [ -f "$$junit" ]; then cp "$$junit" "$(JUNIT_DIR)/$(1).xml"; \
+			python3 tools/scripts/junit_enrich.py "$(JUNIT_DIR)/$(1).xml" \
+				|| echo "::warning::could not add source locations to the JUnit report for '$(1)'"; \
 		else echo "::warning::nextest produced no JUnit report for '$(1)' (build or setup failure?)"; fi; \
 	fi; \
 	exit $$rc
