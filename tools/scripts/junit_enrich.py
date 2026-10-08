@@ -156,22 +156,22 @@ def collect(path: str) -> tuple[dict[str, int], list[dict[str, str]]]:
     return counts, failures
 
 
-def _escape_data(text: str) -> str:
+def escape_data(text: str) -> str:
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def _escape_property(text: str) -> str:
-    return _escape_data(text).replace(":", "%3A").replace(",", "%2C")
+def escape_property(text: str) -> str:
+    return escape_data(text).replace(":", "%3A").replace(",", "%2C")
 
 
 def annotation(failure: dict[str, str]) -> str:
     props = []
     if failure["file"]:
-        props.append(f"file={_escape_property(failure['file'])}")
+        props.append(f"file={escape_property(failure['file'])}")
         if failure["line"]:
-            props.append(f"line={_escape_property(failure['line'])}")
-    props.append(f"title={_escape_property(failure['test'])}")
-    return f"::error {','.join(props)}::{_escape_data(failure['message'])}"
+            props.append(f"line={escape_property(failure['line'])}")
+    props.append(f"title={escape_property(failure['test'])}")
+    return f"::error {','.join(props)}::{escape_data(failure['message'])}"
 
 
 def summary(report: str, counts: dict[str, int], failures: list[dict[str, str]]) -> str:

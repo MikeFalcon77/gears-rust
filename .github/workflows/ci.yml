@@ -143,11 +143,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
-      # log into annotations on the failing line (job page and PR diff).
-      - name: Annotate Rust compiler errors
-        run: echo "::add-matcher::.github/rust-problem-matcher.json"
-
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
@@ -203,8 +198,10 @@ jobs:
       - name: No unpinned database container images
         run: cargo xtask check-test-container-pins
 
+      # The wrapper turns compiler/lint errors into annotations titled by
+      # their code (E0308, DE0904, clippy::...) when the command fails.
       - name: cargo clippy
-        run: make clippy
+        run: tools/scripts/with_rust_annotations.sh make clippy
 
   test:
     name: Test Suite (${{ matrix.os }})
@@ -248,11 +245,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
-      # log into annotations on the failing line (job page and PR diff).
-      - name: Annotate Rust compiler errors
-        run: echo "::add-matcher::.github/rust-problem-matcher.json"
 
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -314,7 +306,8 @@ jobs:
           fi
 
       - name: cargo test (no macros)
-        run: make test-no-macros
+        shell: bash
+        run: tools/scripts/with_rust_annotations.sh make test-no-macros
 
       # Published as GitHub Checks by test-report.yml (workflow_run), which has
       # the `checks: write` this job lacks on fork PRs. `!cancelled()` so a
@@ -357,11 +350,6 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
-      # log into annotations on the failing line (job page and PR diff).
-      - name: Annotate Rust compiler errors
-        run: echo "::add-matcher::.github/rust-problem-matcher.json"
 
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
@@ -413,30 +401,30 @@ jobs:
       # broken toolchain does not cascade into a wall of identical failures.
       - name: UI tests for toolkit macros libraries
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-macros
+        run: tools/scripts/with_rust_annotations.sh make test-macros
 
       - name: Test users_info with Postgres (integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-users-info-pg
+        run: tools/scripts/with_rust_annotations.sh make test-users-info-pg
 
       - name: Test timescaledb usage-collector plugin (pg integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-usage-collector-pg
+        run: tools/scripts/with_rust_annotations.sh make test-usage-collector-pg
 
       - name: Test clickhouse usage-collector plugin (ch integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-usage-collector-ch
+        run: tools/scripts/with_rust_annotations.sh make test-usage-collector-ch
 
       - name: Test postgres-cluster-plugin (pg integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-cluster-pg
+        run: tools/scripts/with_rust_annotations.sh make test-cluster-pg
 
       - name: Test k8s-cluster-plugin (k3s L2+L3 integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # k3s runs in a **privileged** container (testcontainers-modules sets it);
         # GitHub-hosted ubuntu runners permit that. The target uses `cargo test`, not
         # nextest, so one k3s container is shared per test binary -- see the Makefile.
-        run: make test-cluster-k8s
+        run: tools/scripts/with_rust_annotations.sh make test-cluster-k8s
 
       - name: Test resource-group (pg smoke, integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
@@ -444,7 +432,7 @@ jobs:
         # into a green step that asserted nothing.
         env:
           RG_PG_REQUIRE_DOCKER: "1"
-        run: make test-rg-pg
+        run: tools/scripts/with_rust_annotations.sh make test-rg-pg
 
       - name: Test settings-service (pg migrations, integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
@@ -452,7 +440,7 @@ jobs:
         # skip here would be a broken daemon passing green.
         env:
           SETTINGS_SERVICE_PG_REQUIRE_DOCKER: "1"
-        run: make test-settings-service-pg
+        run: tools/scripts/with_rust_annotations.sh make test-settings-service-pg
 
       # bss-pricing's Postgres tests are `#[ignore]`d behind Docker and ran in
       # no job until 2026-08-11 — every concurrency and trigger proof the crate
@@ -460,7 +448,7 @@ jobs:
       # `--no-fail-fast`; see the Makefile for what the default cost on 2026-08-18.
       - name: Test bss-pricing with Postgres (integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-pricing-pg
+        run: tools/scripts/with_rust_annotations.sh make test-pricing-pg
 
       # coord's `m0001_…` writes two independent SQL literals and only the
       # SQLite one is reachable from the in-crate tests — so the `IF NOT EXISTS`
@@ -468,7 +456,7 @@ jobs:
       # `in_schema("bss")` form both gears actually pass, ran in no job.
       - name: Test coord with Postgres (integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-coord-pg
+        run: tools/scripts/with_rust_annotations.sh make test-coord-pg
 
       # bss-products' Postgres tier, added 2026-08-30. It carries the gear's
       # only proofs about racing writers and the only execution of the Postgres
@@ -479,19 +467,19 @@ jobs:
       # records as having cost that gear nine hidden failures.
       - name: Test bss-products with Postgres (integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-products-pg
+        run: tools/scripts/with_rust_annotations.sh make test-products-pg
 
       - name: Test redis-cluster-plugin (redis integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-cluster-redis
+        run: tools/scripts/with_rust_annotations.sh make test-cluster-redis
 
       - name: Test toolkit-db (sqlite integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-sqlite
+        run: tools/scripts/with_rust_annotations.sh make test-sqlite
 
       - name: Test toolkit-db (pg integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-pg
+        run: tools/scripts/with_rust_annotations.sh make test-pg
 
       - name: Test toolkit-db (pgq unit + PG19 integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
@@ -503,15 +491,15 @@ jobs:
         # libs/test-containers::graph_lane_required).
         env:
           GEARS_TEST_PG_GRAPH_REQUIRED: "1"
-        run: make test-pgq
+        run: tools/scripts/with_rust_annotations.sh make test-pgq
 
       - name: Test toolkit-db (mysql integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-mysql
+        run: tools/scripts/with_rust_annotations.sh make test-mysql
 
       - name: Test types-registry (db integration)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: make test-types-registry-db
+        run: tools/scripts/with_rust_annotations.sh make test-types-registry-db
 
       # Published as GitHub Checks by test-report.yml (workflow_run), which has
       # the `checks: write` this job lacks on fork PRs. `!cancelled()` so a
@@ -1019,11 +1007,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
-      # log into annotations on the failing line (job page and PR diff).
-      - name: Annotate Rust compiler errors
-        run: echo "::add-matcher::.github/rust-problem-matcher.json"
-
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
@@ -1081,17 +1064,19 @@ jobs:
           # build profile, not nextest's): run every test, write JUnit.
           NEXTEST_PROFILE: ci
         run: |
-          cargo llvm-cov clean --workspace
+          # Annotates compiler errors of whichever command fails.
+          W=tools/scripts/with_rust_annotations.sh
+          "$W" cargo llvm-cov clean --workspace
           # Pass 1: whole workspace, default features. Accumulate, don't report.
-          cargo llvm-cov nextest --workspace --no-report
+          "$W" cargo llvm-cov nextest --workspace --no-report
           # Pass 2: redis-cluster-plugin integration suites (real Redis via
           # testcontainers).
-          cargo llvm-cov nextest --no-report -p cf-redis-cluster-plugin --features integration --retries 1
+          "$W" cargo llvm-cov nextest --no-report -p cf-redis-cluster-plugin --features integration --retries 1
           # Pass 3: postgres-cluster-plugin integration suites (real Postgres
           # via testcontainers).
-          cargo llvm-cov nextest --no-report -p cf-postgres-cluster-plugin --features integration --retries 1
+          "$W" cargo llvm-cov nextest --no-report -p cf-postgres-cluster-plugin --features integration --retries 1
           # Pass 4: k8s-cluster-plugin k3s suites
-          make coverage-cluster-k8s
+          "$W" make coverage-cluster-k8s
           # Merge into the single report that gets uploaded.
           cargo llvm-cov report --lcov --output-path lcov.info
 
@@ -1145,11 +1130,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # Turns rustc/clippy/dylint `error: ... --> file:line:col` lines in the
-      # log into annotations on the failing line (job page and PR diff).
-      - name: Annotate Rust compiler errors
-        run: echo "::add-matcher::.github/rust-problem-matcher.json"
-
       - name: Install protoc
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
@@ -1164,4 +1144,4 @@ jobs:
         run: cargo install --locked cargo-gears
 
       - name: Run architecture lints
-        run: cargo gears lint --dylint
+        run: tools/scripts/with_rust_annotations.sh cargo gears lint --dylint
