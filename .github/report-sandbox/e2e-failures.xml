@@ -1,8 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="e2e-probe" errors="0" failures="1" skipped="1" tests="3" time="0.019" timestamp="2026-10-08T15:54:55.877447+03:00" hostname="HAF700"><testcase classname="test_probe" name="test_probe_passes" time="0.000" /><testcase classname="test_probe" name="test_probe_fails_assert" time="0.000"><failure message="AssertionError: health endpoint not ready&#10;assert 503 == 200">def test_probe_fails_assert():
-        status = 503
-        print("GET /health -&gt;", status)
-&gt;       assert status == 200, "health endpoint not ready"
-E       AssertionError: health endpoint not ready
-E       assert 503 == 200
-
-test_probe.py:9: AssertionError</failure></testcase><testcase classname="test_probe" name="test_probe_skipped" time="0.000"><skipped type="pytest.skip" message="probe skipped">/tmp/claude-1000/-home-mike-projects-gears-rust/daf0eb36-7ea8-4851-84a3-037588a09fc5/scratchpad/pyprobe/test_probe.py:11: probe skipped</skipped></testcase></testsuite></testsuites>
+<?xml version='1.0' encoding='UTF-8'?>
+<testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="1" tests="4" time="0.020" timestamp="2026-10-08T16:44:26.152822+03:00" hostname="HAF700"><testcase classname="test_probe" name="test_probe_passes" time="0.000" /><testcase classname="test_probe" name="test_probe_fails_assert" time="0.000" file="testing/e2e/suites/oop/test_probe.py" line="9"><failure message="AssertionError: health endpoint not ready&#10;assert 503 == 200">testing/e2e/suites/oop/test_probe.py:9: in test_probe_fails_assert
+    assert status == 200, "health endpoint not ready"
+E   AssertionError: health endpoint not ready
+E   assert 503 == 200</failure></testcase><testcase classname="test_probe" name="test_probe_skipped" time="0.000"><skipped type="pytest.skip" message="probe skipped">/tmp/claude-1000/-home-mike-projects-gears-rust/daf0eb36-7ea8-4851-84a3-037588a09fc5/scratchpad/pyprobe2/testing/e2e/suites/oop/test_probe.py:11: probe skipped</skipped></testcase><testcase classname="test_probe" name="test_probe_fails_in_helper" time="0.001" file="testing/e2e/suites/oop/test_probe.py" line="17"><failure message="AssertionError: bad status 500">testing/e2e/suites/oop/test_probe.py:17: in test_probe_fails_in_helper
+    check(500)
+sub/helper.py:2: in check
+    assert v == 200, f"bad status {v}"
+           ^^^^^^^^
+E   AssertionError: bad status 500</failure></testcase></testsuite></testsuites>
