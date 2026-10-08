@@ -32,9 +32,19 @@ exactly as the runner wrote it. Called by the Makefile's `nextest_run` and by
 the e2e workflow after a report is saved; a failure here must never change
 the test outcome, so callers treat a non-zero exit as a warning.
 
-Usage: junit_enrich.py REPORT.xml [REPORT.xml ...]
+With --github (set by callers inside GitHub Actions), the failures are also
+surfaced in the job that ran the tests, without waiting for test-report.yml:
+
+- one `::error file=...,line=...` workflow command per failing test (GitHub
+  shows at most 10 per step), visible at the top of the job page and on the
+  PR diff -- workflow commands need no token, so fork PRs get them too;
+- a block in $GITHUB_STEP_SUMMARY: pass/fail/skip counts and every failing
+  test with a link to its source line and its message.
+
+Usage: junit_enrich.py [--github] REPORT.xml [REPORT.xml ...]
 """
 
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -101,12 +111,108 @@ def enrich(path: str) -> int:
     return changed
 
 
+# GitHub stops rendering annotations past this many per step anyway.
+MAX_ANNOTATIONS = 10
+
+
+def collect(path: str) -> tuple[dict[str, int], list[dict[str, str]]]:
+    """Counts by outcome and the failing test cases of one report."""
+    counts = {"passed": 0, "failed": 0, "skipped": 0, "flaky": 0}
+    failures = []
+    for case in ET.parse(path).iter("testcase"):
+        failure = case.find("failure")
+        if failure is None:
+            failure = case.find("error")
+        if failure is not None:
+            counts["failed"] += 1
+            file, line = case.get("file", ""), case.get("line", "")
+            message = failure.get("message") or (failure.text or "").strip() or "Test failed"
+            # The location is carried separately; don't repeat it in the text.
+            if file and message.startswith(f"{file}:{line}: "):
+                message = message[len(f"{file}:{line}: "):]
+            classname = case.get("classname", "")
+            name = case.get("name", "")
+            failures.append({
+                "test": f"{classname} › {name}" if classname else name,
+                "file": file,
+                "line": line,
+                "message": message,
+            })
+        elif case.find("skipped") is not None:
+            counts["skipped"] += 1
+        else:
+            counts["passed"] += 1
+            # nextest: passed on retry, with the failed attempts recorded.
+            if case.find("flakyFailure") is not None or case.find("rerunFailure") is not None:
+                counts["flaky"] += 1
+    return counts, failures
+
+
+def _escape_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_property(text: str) -> str:
+    return _escape_data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+def annotation(failure: dict[str, str]) -> str:
+    props = []
+    if failure["file"]:
+        props.append(f"file={_escape_property(failure['file'])}")
+        if failure["line"]:
+            props.append(f"line={_escape_property(failure['line'])}")
+    props.append(f"title={_escape_property(failure['test'])}")
+    return f"::error {','.join(props)}::{_escape_data(failure['message'])}"
+
+
+def summary(report: str, counts: dict[str, int], failures: list[dict[str, str]]) -> str:
+    stats = f"{counts['failed']} failed, {counts['passed']} passed, {counts['skipped']} skipped"
+    if counts["flaky"]:
+        stats += f", {counts['flaky']} flaky"
+    if not failures:
+        return f"#### ✅ {report} — {stats}\n\n"
+    server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    sha = os.environ.get("GITHUB_SHA")
+    out = [f"#### ❌ {report} — {stats}", ""]
+    for f in failures:
+        where = ""
+        if f["file"]:
+            loc = f"{f['file']}:{f['line']}" if f["line"] else f["file"]
+            if repo and sha:
+                anchor = f"#L{f['line']}" if f["line"] else ""
+                where = f" — [{loc}]({server}/{repo}/blob/{sha}/{f['file']}{anchor})"
+            else:
+                where = f" — `{loc}`"
+        out += [f"- **{f['test']}**{where}", "", "  ````", *(f"  {l}" for l in f["message"].splitlines()), "  ````", ""]
+    return "\n".join(out) + "\n"
+
+
+def publish(path: str) -> None:
+    """Annotations on stdout and a block in the step summary for one report."""
+    counts, failures = collect(path)
+    for failure in failures[:MAX_ANNOTATIONS]:
+        print(annotation(failure))
+    if len(failures) > MAX_ANNOTATIONS:
+        print(f"::notice::{len(failures) - MAX_ANNOTATIONS} more failing test(s) in {path}; see the job summary")
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        report = os.path.splitext(os.path.basename(path))[0]
+        with open(summary_file, "a", encoding="utf-8") as fh:
+            fh.write(summary(report, counts, failures))
+
+
 def main(argv: list[str]) -> int:
-    if not argv:
+    github = "--github" in argv
+    paths = [a for a in argv if a != "--github"]
+    if not paths:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
         return 2
-    for path in argv:
+    for path in paths:
         print(f"junit_enrich: {path}: {enrich(path)} failure(s) annotated")
+        if github:
+            publish(path)
     return 0
 
 
