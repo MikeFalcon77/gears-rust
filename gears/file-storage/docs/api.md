@@ -768,16 +768,17 @@ avoid leaving this unswept sibling behind.
   enforces it (`<alg>` is `SHA-256`, the only algorithm its comparison matches; the hex digest is compared
   case-insensitively with the streamed SHA-256, `400` on mismatch), but no control-plane path sets it today —
   `create_file`, its idempotent replay and `presign_version` bake only `max_size`, and no REST request field can
-  supply a hash (`CreateFileReq` has none). Upload integrity therefore rests on the control plane's
-  re-verification at `finalize`.
+  supply a hash (`CreateFileReq` has none). Upload integrity therefore rests on the sidecar's
+  streamed SHA-256 (reported over the authenticated callback) plus finalize's size check against the stored object.
 - **`max_rate` / `max_conns` are not implemented.** No such claims exist on `Claims` and the sidecar enforces no
   per-URL rate/connection cap; this remains an open design point (scoping to one `(file_id, op)` and cross-instance
   coordination across the sidecar fleet).
 - **Outside the token:** the `Range` header, conditional headers, and the `PUT` body are not part of the token — so one
-  signed URL serves many ranges, and body integrity is enforced by `max_size`/`expected_hash` during the stream plus a
-  control-plane re-verification at `finalize`, which re-reads the stored blob and recomputes its size/hash rather than
-  trusting the sidecar's report (single-part); a multipart upload instead derives the composite hash from the
-  reported per-part hashes during `complete` (no full assembled-object read-back — only a bounded MIME-sniff read).
+  signed URL serves many ranges, and body integrity is enforced by `max_size`/`expected_hash` during the stream plus the
+  sidecar's streamed SHA-256, reported over the authenticated callback; `finalize` only checks the reported size
+  against the stored object's length and keeps the hash the sidecar measured (single-part); a multipart upload
+  instead derives the composite hash from the reported per-part hashes during `complete` (no full assembled-object
+  read-back — only a bounded MIME-sniff read).
   `bind` performs no integrity check of its own — it only swaps `content_id`
   to point at an already-finalized (`Available`) version, guarded by the `If-Match` content-ETag precondition above.
 - **"Baked response headers" claim — not implemented.** The token's only response-header claims are the two specific

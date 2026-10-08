@@ -383,35 +383,33 @@ finalizing a version after a successful single-part `PUT`, and reporting a succe
 callback's sole authorization **MUST** be the same signed upload token (`cpt-cf-file-storage-fr-signed-urls`) that
 authorized the original upload — no separate app-token or on-behalf-of delegation. The control plane **MUST** accept
 the callback within a short grace period after the token's `exp` has passed, since the callback necessarily arrives
-after the byte transfer the token authorized completes. On every callback the control plane **MUST** independently
-re-verify the reported size and content hash against what it observes (or, for a part, against the claims embedded in
-that part's own token) rather than trusting the sidecar's report at face value.
+after the byte transfer the token authorized completes. On finalize the control plane **MUST** check the reported
+size against the stored object's length and **MUST** reject a missing object; it **MUST NOT** re-read the object and
+persists the content hash the authenticated sidecar measured while streaming. A part's reported size **MUST** be
+checked against the claims embedded in that part's own token.
 
 **Rationale**: The sidecar holds no metadata-DB connection and no delegated user identity of its own
 (`cpt-cf-file-storage-fr-authorization`), so the signed token it already verified for the byte transfer is the only
 authorization available for reporting the outcome back. A short post-`exp` grace period accommodates the callback's
-inherent lag behind the transfer without extending the token's authority for any new operation. Independent
-re-verification on the control plane means a compromised or buggy sidecar cannot finalize a version whose actual
-bytes do not match what was claimed.
+inherent lag behind the transfer without extending the token's authority for any new operation. Re-reading every
+object at finalize would double the read traffic of every upload; the sidecar is an authenticated internal component
+(signed token plus the mandatory `x-fs-internal-token`), so its measured digest is trusted, while the size check
+still catches a missing or truncated object.
 **Actors**: `cpt-cf-file-storage-actor-cf-gears`
 
 #### Internal Callback Token (Second Factor)
 
 - [x] `p2` - **ID**: `cpt-cf-file-storage-fr-callback-internal-token`
 
-The system **MUST** support an optional shared-secret second factor, carried as the `x-fs-internal-token` header, on
-top of the signed upload token for the sidecar's finalize and report-part callbacks
-(`cpt-cf-file-storage-fr-sidecar-callbacks`). When no secret is configured, the control plane **MUST** accept a
-callback authorized by the signed token alone, unchanged from today. When a secret is configured, the control plane
-**MUST** additionally require a matching `x-fs-internal-token` on every such callback, rejecting a missing or
-mismatched header. Whether an absent secret is itself a startup error **MUST** be configurable, so a deployment can
-choose to fail fast rather than silently run without the second factor.
+The system **MUST** require a shared-secret second factor, carried as the `x-fs-internal-token` header, on top of
+the signed upload token for the sidecar's finalize and report-part callbacks
+(`cpt-cf-file-storage-fr-sidecar-callbacks`). The control plane **MUST** reject a callback with a missing or
+mismatched header. A deployment without a configured secret **MUST** fail at startup on both the control plane and
+the sidecar.
 
-**Rationale**: The signed upload token alone is sufficient authorization for a callback, but a deployment that wants
-an additional network-boundary control (e.g. because the sidecar-to-control-plane hop traverses a less trusted
-network segment) can add a shared secret without changing the token-based authorization model. Making both the
-secret's presence and its enforcement independently configurable lets a deployment roll the secret out gradually
-(set it on both sides before requiring it) instead of risking an outage from a mismatched rollout.
+**Rationale**: The callbacks persist whatever the sidecar reports (`cpt-cf-file-storage-fr-sidecar-callbacks`), so
+they must be reachable only by the deployment's own sidecar; a mandatory secret makes a misconfigured deployment fail
+fast instead of silently running without the second factor.
 **Actors**: `cpt-cf-file-storage-actor-cf-gears`
 
 #### Content-Type Validation
@@ -1540,7 +1538,7 @@ code; see `cpt-cf-file-storage-fr-owner-deletion`.
 4. Control plane returns a **signed upload URL** to the sidecar (`cpt-cf-file-storage-fr-signed-urls`)
 5. User transfers the bytes to the **sidecar** at that URL; the sidecar streams to the backend object
    `/{file_id}/{version_id}`, computes the hash, and calls the control plane's token-authenticated finalize
-   callback, which independently re-verifies the bytes and flips the version to available; for the common
+   callback, which checks the reported size against the stored object and flips the version to available; for the common
    auto-bind case that same finalize call also **binds** the new version as current under optimistic CAS, in the
    same transaction — the sidecar itself never binds and holds no delegated identity of its own
 6. *(Phase 2)* Audit record emitted for the upload
