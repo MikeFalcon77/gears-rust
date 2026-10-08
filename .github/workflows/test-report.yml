@@ -1,0 +1,81 @@
+name: Test Report
+
+# Publishes the JUnit reports that `CI` (nextest) and `e2e` (pytest) upload as
+# artifacts, as GitHub Check Runs plus an Actions summary: failing test names,
+# assertion messages and captured output, without reading the job logs.
+#
+# Why a separate workflow: those workflows run on `pull_request`, and a PR from
+# a fork gets a read-only token there, so it cannot create Check Runs. A
+# `workflow_run` workflow always runs this file from the default branch with
+# the base repository's token. That is also why it must stay inert towards the
+# PR: no checkout, no PR code executed -- the downloaded XML is the only input,
+# and it is parsed as data by the reporter.
+#
+# Visibility only: the CI and e2e jobs remain the gate. Do not make these
+# checks required in branch protection.
+
+on:
+  workflow_run:
+    workflows: ["CI", "e2e"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
+  report:
+    name: Publish test reports (${{ github.event.workflow_run.name }})
+    # A cancelled run is not a test result; report nothing rather than a
+    # partial or empty one.
+    if: github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # A test job that was skipped (path filters) or died before its upload
+      # leaves no artifact. Publishing only what exists keeps a skipped job
+      # from turning into a "0 tests passed" check.
+      - name: Find test-result artifacts
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          names=$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[].name')
+          printf 'Artifacts of run %s:\n%s\n' "$RUN_ID" "$names"
+          echo "rust=$(grep -c '^rust-tests-' <<<"$names" || true)" >> "$GITHUB_OUTPUT"
+          echo "e2e=$(grep -c '^e2e-tests-' <<<"$names" || true)" >> "$GITHUB_OUTPUT"
+
+      # One Check Run per artifact: rust-tests-Linux|Windows|macOS|integration.
+      # fail-on-error is off because the check's own conclusion already says
+      # `failure`; failing this workflow too would only add a duplicate red X.
+      # fail-on-empty stays on: an uploaded report with no tests in it is a
+      # broken lane, not a pass.
+      - name: Publish Rust test results
+        if: steps.find.outputs.rust != '0'
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
+        with:
+          artifact: /rust-tests-(.*)/
+          name: Rust Tests / $1
+          path: '**/*.xml'
+          reporter: java-junit
+          list-tests: failed
+          fail-on-error: false
+          fail-on-empty: true
+          use-actions-summary: true
+
+      # e2e-tests-local (PR and nightly) and e2e-tests-docker.
+      - name: Publish E2E test results
+        if: steps.find.outputs.e2e != '0'
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3.0.0
+        with:
+          artifact: /e2e-tests-(.*)/
+          name: E2E / $1
+          path: '**/*.xml'
+          reporter: java-junit
+          list-tests: failed
+          fail-on-error: false
+          fail-on-empty: true
+          use-actions-summary: true

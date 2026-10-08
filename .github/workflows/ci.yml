@@ -217,6 +217,11 @@ jobs:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
     env:
       RUSTFLAGS: "-C debuginfo=0"
+      # nextest writes JUnit under the `ci` profile; the Makefile copies each
+      # run's report into JUNIT_DIR (see `nextest_run`). Relative on purpose:
+      # an absolute Windows path would reach make's sh with backslashes.
+      NEXTEST_PROFILE: ci
+      JUNIT_DIR: test-results
     steps:
       - name: Free disk space
         if: runner.os == 'Linux'
@@ -301,6 +306,19 @@ jobs:
       - name: cargo test (no macros)
         run: make test-no-macros
 
+      # Published as GitHub Checks by test-report.yml (workflow_run), which has
+      # the `checks: write` this job lacks on fork PRs. `!cancelled()` so a
+      # failing run still ships its report; a missing report (build failure)
+      # is a warning here and the job is already red from the step above.
+      - name: Upload Rust test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-tests-${{ runner.os }}
+          path: test-results/*.xml
+          if-no-files-found: warn
+          retention-days: 14
+
   integration:
     name: Integration tests
     needs: changes
@@ -313,6 +331,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-C debuginfo=0"
+      # See the `test` job: per-suite JUnit reports land in JUNIT_DIR.
+      NEXTEST_PROFILE: ci
+      JUNIT_DIR: test-results
     steps:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
@@ -361,6 +382,7 @@ jobs:
 
       # Probe sccache; if startup fails, fall back to plain rustc (no hard CI failure).
       - name: Probe sccache & set RUSTC_WRAPPER
+        id: setup
         shell: bash
         run: |
           if sccache --start-server >/dev/null 2>&1; then
@@ -370,28 +392,39 @@ jobs:
             echo "sccache failed, falling back to plain rustc"
           fi
 
+      # Every test step below runs even when an earlier one failed
+      # (`!cancelled()`), so one broken suite no longer hides the results of the
+      # rest; the job still fails if any of them did. Gated on `setup` so a
+      # broken toolchain does not cascade into a wall of identical failures.
       - name: UI tests for toolkit macros libraries
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-macros
 
       - name: Test users_info with Postgres (integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-users-info-pg
 
       - name: Test timescaledb usage-collector plugin (pg integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-usage-collector-pg
 
       - name: Test clickhouse usage-collector plugin (ch integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-usage-collector-ch
 
       - name: Test postgres-cluster-plugin (pg integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-cluster-pg
 
       - name: Test k8s-cluster-plugin (k3s L2+L3 integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # k3s runs in a **privileged** container (testcontainers-modules sets it);
         # GitHub-hosted ubuntu runners permit that. The target uses `cargo test`, not
         # nextest, so one k3s container is shared per test binary -- see the Makefile.
         run: make test-cluster-k8s
 
       - name: Test resource-group (pg smoke, integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # Fail if Docker is unreachable instead of letting the suite skip itself
         # into a green step that asserted nothing.
         env:
@@ -399,6 +432,7 @@ jobs:
         run: make test-rg-pg
 
       - name: Test settings-service (pg migrations, integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # Same shape as resource-group above: Docker is on this runner, so a
         # skip here would be a broken daemon passing green.
         env:
@@ -410,6 +444,7 @@ jobs:
       # owns lives in them. This job already has Docker. The target passes
       # `--no-fail-fast`; see the Makefile for what the default cost on 2026-08-18.
       - name: Test bss-pricing with Postgres (integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-pricing-pg
 
       # coord's `m0001_…` writes two independent SQL literals and only the
@@ -417,6 +452,7 @@ jobs:
       # that stops the `bss-pricing`-beside-`bss-ledger` boot crash, and the
       # `in_schema("bss")` form both gears actually pass, ran in no job.
       - name: Test coord with Postgres (integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-coord-pg
 
       # bss-products' Postgres tier, added 2026-08-30. It carries the gear's
@@ -427,18 +463,23 @@ jobs:
       # here and runs nowhere, which is the state the pricing comment above
       # records as having cost that gear nine hidden failures.
       - name: Test bss-products with Postgres (integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-products-pg
 
       - name: Test redis-cluster-plugin (redis integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-cluster-redis
 
       - name: Test toolkit-db (sqlite integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-sqlite
 
       - name: Test toolkit-db (pg integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-pg
 
       - name: Test toolkit-db (pgq unit + PG19 integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         # Compiles and runs everything behind the `pgq` feature — the secure
         # graph builder, its unit suites and the trybuild guards — and the
         # PostgreSQL 19 integration suite. Locally that suite skips itself while
@@ -450,10 +491,25 @@ jobs:
         run: make test-pgq
 
       - name: Test toolkit-db (mysql integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-mysql
 
       - name: Test types-registry (db integration)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         run: make test-types-registry-db
+
+      # Published as GitHub Checks by test-report.yml (workflow_run), which has
+      # the `checks: write` this job lacks on fork PRs. `!cancelled()` so a
+      # failing run still ships its report; a missing report (build failure)
+      # is a warning here and the job is already red from the step above.
+      - name: Upload Rust test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-tests-integration
+          path: test-results/*.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   test-fips:
     name: FIPS verification (${{ matrix.os }})
