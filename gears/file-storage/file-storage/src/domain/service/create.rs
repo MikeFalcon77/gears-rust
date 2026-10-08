@@ -21,10 +21,6 @@ impl FileService {
     /// Resolve the effective policy for a given `(tenant_id, owner_id)` pair
     /// using an internal (`allow_all`) scope — callers have already been
     /// authorized for the file operation; this is a preflight check only.
-    ///
-    /// @cpt-cf-file-storage-fr-allowed-types-policy
-    /// @cpt-cf-file-storage-fr-size-limits-policy
-    /// @cpt-cf-file-storage-fr-metadata-limits
     pub(super) async fn get_effective_policy_internal(
         &self,
         tenant_id: Uuid,
@@ -58,8 +54,6 @@ impl FileService {
     ///
     /// `op` labels the caller (`"create_file"` / `"presign_version"`) for the
     /// `quota_denied` metric (P2 1.8 remediation).
-    ///
-    /// @cpt-cf-file-storage-fr-storage-quota
     pub(super) async fn check_quota(
         &self,
         tenant_id: Uuid,
@@ -96,9 +90,6 @@ impl FileService {
 
     /// `POST /files`: create a file and presign the first content upload.
     /// An optional `idempotency_key` deduplicates retried requests.
-    ///
-    /// @cpt-cf-file-storage-fr-upload-idempotency
-    /// @cpt-cf-file-storage-fr-audit-trail
     #[tracing::instrument(skip_all)]
     pub async fn create_file(
         &self,
@@ -110,7 +101,6 @@ impl FileService {
         let owner_id = new.owner_id;
         let owner_kind_str = new.owner_kind.as_str().to_owned();
 
-        // @cpt-cf-file-storage-fr-upload-idempotency
         // Canonicalize the current request into a comparable hash up front —
         // both the replay-comparison path (below) and the fresh-insert path
         // (further down) must hash the exact same encoding of the same
@@ -129,7 +119,6 @@ impl FileService {
             &initial_meta,
         );
 
-        // @cpt-cf-file-storage-fr-upload-idempotency
         // Authorize the write BEFORE consulting any stored idempotency
         // record. The idempotency lookup used to run first and return early
         // with a live signed upload URL — a caller whose WRITE grant was
@@ -142,7 +131,6 @@ impl FileService {
             .authorize(ctx, actions::WRITE, &new.gts_file_type, None)
             .await?;
 
-        // @cpt-cf-file-storage-fr-upload-idempotency
         // Now that the caller is authorized, consult the idempotency store.
         // The stored record is bound to the subject that created it
         // (`subject_id`); a caller can never surface another caller's ticket
@@ -160,7 +148,6 @@ impl FileService {
                 if record.subject_id != ctx.subject_id() {
                     return Err(DomainError::Forbidden);
                 }
-                // @cpt-cf-file-storage-fr-upload-idempotency
                 // P2 remediation 2.1: a retried request with the same key but
                 // a materially different body (owner, name, gts_file_type,
                 // mime_type, custom_metadata) must never silently replay the
@@ -182,11 +169,6 @@ impl FileService {
             }
         }
 
-        // @cpt-cf-file-storage-fr-allowed-types-policy
-        // @cpt-cf-file-storage-fr-size-limits-policy
-        // @cpt-cf-file-storage-fr-metadata-limits
-        // @cpt-cf-file-storage-fr-storage-quota
-        // @cpt-dod:cpt-cf-file-storage-dod-policy-enforcement-wiring:p1
         let policy = self
             .get_effective_policy_internal(tenant_id, owner_id)
             .await?;
@@ -216,7 +198,6 @@ impl FileService {
         let backend_id = backend.id().to_owned();
         let backend_path = Self::backend_path(file_id, version_id);
 
-        // @cpt-cf-file-storage-fr-audit-trail
         let audit = Self::audit_ok(
             ctx,
             Some(file_id),
@@ -224,7 +205,6 @@ impl FileService {
             serde_json::json!({ "version_id": version_id, "gts_file_type": new.gts_file_type }),
         );
 
-        // @cpt-cf-file-storage-fr-file-events
         let event = Some(Self::make_file_event(
             tenant_id,
             owner_id,
@@ -256,7 +236,6 @@ impl FileService {
             upload_url,
         };
 
-        // @cpt-cf-file-storage-fr-upload-idempotency
         // Build the idempotency row so the create transaction persists it in the
         // same commit as the file — a committed create always leaves a replay
         // record behind, so a retry with the same key never creates a 2nd file.
@@ -300,7 +279,6 @@ impl FileService {
             )
             .await?;
 
-        // @cpt-cf-file-storage-fr-usage-reporting
         // Fire-and-forget: report +1 file to usage collector.
         self.report_usage(UsageDelta {
             tenant_id,
@@ -334,9 +312,6 @@ impl FileService {
             .await?
             .unwrap_or_else(|| "application/octet-stream".to_owned());
 
-        // @cpt-cf-file-storage-fr-allowed-types-policy
-        // @cpt-cf-file-storage-fr-size-limits-policy
-        // @cpt-cf-file-storage-fr-storage-quota
         let tenant_id = ctx.subject_tenant_id();
         let owner_id = file.owner_id;
         let policy = self

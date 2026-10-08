@@ -341,8 +341,6 @@ impl StorageBackend for LocalFsBackend {
     ///
     /// Non-existent root (fresh install with no uploads yet) returns an empty
     /// vec rather than an error.
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
     async fn list_paths(&self) -> Result<Vec<String>, DomainError> {
         // If the root does not exist yet (no blobs written), return empty.
         match tokio::fs::metadata(&self.root).await {

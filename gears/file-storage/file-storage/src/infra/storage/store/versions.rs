@@ -135,9 +135,6 @@ impl Store {
     /// `manifest = None` and write no manifest row.
     ///
     /// An audit row is written in the same transaction.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     #[allow(clippy::too_many_arguments)]
     pub async fn finalize_version(
         &self,
@@ -155,7 +152,6 @@ impl Store {
         let audit_repo = self.repos.audit.clone();
         let hash_mode_str = hash_mode.as_str();
         let now = OffsetDateTime::now_utc();
-        // @cpt-begin:cpt-cf-file-storage-flow-audit-trail-record-write:p1:inst-audit-commit-or-rollback
         self.db
             .db()
             .transaction_ref_mapped(move |tx| {
@@ -182,16 +178,12 @@ impl Store {
                                 .insert_manifest(tx, &scope, version_id, &manifest, now)
                                 .await?;
                         }
-                        // @cpt-cf-file-storage-nfr-audit-completeness
-                        // @cpt-begin:cpt-cf-file-storage-flow-audit-trail-record-write:p1:inst-audit-insert-same-tx
                         audit_repo.insert(tx, &audit).await?;
-                        // @cpt-end:cpt-cf-file-storage-flow-audit-trail-record-write:p1:inst-audit-insert-same-tx
                     }
                     Ok::<bool, DomainError>(updated)
                 })
             })
             .await
-        // @cpt-end:cpt-cf-file-storage-flow-audit-trail-record-write:p1:inst-audit-commit-or-rollback
     }
 
     /// Fetch the `version_hash_manifest` text for a version, if one exists
@@ -224,9 +216,6 @@ impl Store {
     /// so even a concurrent `bind` that commits between the read below and the
     /// delete statement cannot leave `files.content_id` dangling: the delete
     /// simply removes 0 rows and this returns `false`.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub async fn delete_version(
         &self,
         file_id: Uuid,
@@ -260,7 +249,6 @@ impl Store {
                         // caught it.
                         return Ok(false);
                     }
-                    // @cpt-cf-file-storage-nfr-audit-completeness
                     audit_repo.insert(tx, &audit).await?;
                     Ok(true)
                 })
@@ -276,9 +264,6 @@ impl Store {
     /// expired multipart session's pending version row, so a version that a
     /// racing `complete_multipart_upload` has already flipped to `available`
     /// is never deleted.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub async fn delete_pending_version(
         &self,
         file_id: Uuid,
@@ -301,7 +286,6 @@ impl Store {
                         )
                         .await?;
                     if removed {
-                        // @cpt-cf-file-storage-nfr-audit-completeness
                         audit_repo.insert(tx, &audit).await?;
                     }
                     Ok::<bool, DomainError>(removed)
@@ -324,9 +308,6 @@ impl Store {
     /// Returns `true` on a successful swap, `false` on a concurrent CAS
     /// conflict (caller maps to PreconditionFailed; REST maps that canonical
     /// error to HTTP 400).
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub async fn bind_atomic(
         &self,
         scope: &AccessScope,
@@ -364,7 +345,6 @@ impl Store {
                     versions
                         .set_current(tx, &AccessScope::allow_all(), file_id, version_id)
                         .await?;
-                    // @cpt-cf-file-storage-nfr-audit-completeness
                     audit_repo.insert(tx, &audit).await?;
                     Ok::<bool, DomainError>(true)
                 })
@@ -377,10 +357,6 @@ impl Store {
     ///
     /// This is the events-aware variant of [`bind_atomic`]; the original is
     /// preserved for callers that do not need event enqueuing.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-fr-file-events
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     #[allow(clippy::too_many_arguments)]
     pub async fn bind_atomic_with_event(
         &self,
@@ -438,8 +414,6 @@ impl Store {
     /// updated. `false` means either the version is gone or a concurrent
     /// migration already moved the pointer away from the expected value —
     /// the caller must re-fetch to tell these apart.
-    ///
-    /// @cpt-cf-file-storage-fr-backend-migration
     #[allow(clippy::too_many_arguments)]
     pub async fn rebind_version_backend(
         &self,
@@ -488,9 +462,6 @@ impl Store {
     /// row, and record an audit row — all in one transaction.
     ///
     /// Returns `true` if the file row was found and updated.
-    ///
-    /// @cpt-cf-file-storage-fr-ownership-transfer
-    /// @cpt-cf-file-storage-fr-file-events
     #[allow(clippy::too_many_arguments)]
     pub async fn transfer_ownership_atomic(
         &self,

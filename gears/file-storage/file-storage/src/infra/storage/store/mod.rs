@@ -21,9 +21,6 @@
 //! (or wraps) a DB transaction inserts an [`AuditEntry`] row in the **same**
 //! transaction, guaranteeing 100% coverage with no silent drops.
 //!
-//! @cpt-cf-file-storage-fr-audit-trail
-//! @cpt-cf-file-storage-nfr-audit-completeness
-//!
 //! ## Accepted Henry-Kafura hub (do not fragment further)
 //!
 //! `Store` is the **single unit-of-work persistence facade** — the one type that
@@ -148,9 +145,6 @@ impl Store {
     /// computation is confined here because this module already owns the
     /// SHA-256 allow-list usage (see `hash.rs` docs), keeping `FileService`
     /// free of a direct `hash` import.
-    ///
-    /// @cpt-cf-file-storage-fr-backend-migration
-    /// @cpt-cf-file-storage-algo-content-hash-modes-verify
     pub fn verify_content_hash(
         blob: &[u8],
         hash_mode: HashMode,
@@ -159,7 +153,6 @@ impl Store {
     ) -> Result<(), crate::domain::error::DomainError> {
         use crate::domain::error::DomainError;
         match hash_mode {
-            // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-whole
             HashMode::WholeSha256 => {
                 if manifest.is_some() {
                     return Err(DomainError::validation(
@@ -176,7 +169,6 @@ impl Store {
                 }
                 Ok(())
             }
-            // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-whole
             HashMode::MultipartCompositeSha256 => {
                 let manifest = manifest.ok_or_else(|| {
                     DomainError::validation(
@@ -200,13 +192,10 @@ impl Store {
         use crate::domain::error::DomainError;
         use crate::infra::content::hash_mode::{Manifest, ManifestEntry};
 
-        // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-parse-manifest
         let parsed = Manifest::from_wire_string(manifest)?;
         let entries = parsed.entries();
         let blob_len = blob.len() as u64;
-        // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-parse-manifest
 
-        // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-per-part
         let mut rebuilt = Vec::with_capacity(entries.len());
         for (i, entry) in entries.iter().enumerate() {
             // Each part spans [offset, next_offset) — the final part runs to
@@ -237,22 +226,15 @@ impl Store {
                 digest,
             });
         }
-        // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-per-part
 
-        // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-reserialize
         let rebuilt_root = Manifest::new(rebuilt)?.root();
-        // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-reserialize
-        // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-root-compare
         if rebuilt_root.as_slice() != root {
             return Err(DomainError::hash_mismatch(
                 hex::encode(root),
                 hex::encode(rebuilt_root),
             ));
         }
-        // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-root-compare
-        // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-return
         Ok(())
-        // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-verify:p1:inst-verify-return
     }
 }
 

@@ -12,8 +12,6 @@ impl Store {
     // ── multipart uploads (P2-M3) ─────────────────────────────────────────────
 
     /// Create a multipart upload session row.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     #[allow(clippy::too_many_arguments)]
     pub async fn create_multipart_upload(
         &self,
@@ -46,8 +44,6 @@ impl Store {
     }
 
     /// Fetch a multipart upload session by `upload_id`.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     pub async fn get_multipart_upload(
         &self,
         upload_id: Uuid,
@@ -57,8 +53,6 @@ impl Store {
     }
 
     /// Insert or replace a multipart upload part.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     #[allow(clippy::too_many_arguments)]
     pub async fn upsert_multipart_part(
         &self,
@@ -89,8 +83,6 @@ impl Store {
     ///
     /// P2 2.8 orphan-file-reconciliation guard -- see
     /// `MultipartRepo::has_in_progress_for_file`.
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
     pub async fn has_in_progress_multipart_for_file(
         &self,
         file_id: Uuid,
@@ -121,8 +113,6 @@ impl Store {
     }
 
     /// List all parts for a multipart upload.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     pub async fn list_multipart_parts(
         &self,
         upload_id: Uuid,
@@ -140,10 +130,6 @@ impl Store {
     /// bytes and validated them against `session.declared_mime` (bailing out
     /// with `DomainError::mime_mismatch` before ever reaching this call on a
     /// mismatch) — so reaching this point means the content is validated.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub async fn complete_multipart_upload(
         &self,
         upload_id: Uuid,
@@ -159,7 +145,6 @@ impl Store {
                         .update_state(tx, upload_id, "in_progress", "completed", Some(true))
                         .await?;
                     if updated {
-                        // @cpt-cf-file-storage-nfr-audit-completeness
                         audit_repo.insert(tx, &audit).await?;
                     }
                     Ok::<bool, DomainError>(updated)
@@ -170,10 +155,6 @@ impl Store {
 
     /// Mark a multipart upload session as `aborted` and record the audit row
     /// in the same transaction.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub async fn abort_multipart_upload(
         &self,
         upload_id: Uuid,
@@ -189,7 +170,6 @@ impl Store {
                         .update_state(tx, upload_id, "in_progress", "aborted", None)
                         .await?;
                     if updated {
-                        // @cpt-cf-file-storage-nfr-audit-completeness
                         audit_repo.insert(tx, &audit).await?;
                     }
                     Ok::<bool, DomainError>(updated)

@@ -61,14 +61,10 @@ pub(crate) fn build_manifest_and_root(
             digest: *digest,
         })
         .collect();
-    // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-build-manifest:p1:inst-buildmanifest-sort
     entries.sort_by_key(|e| e.offset);
-    // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-build-manifest:p1:inst-buildmanifest-sort
     let manifest = Manifest::new(entries)?;
     let root = manifest.root();
-    // @cpt-begin:cpt-cf-file-storage-algo-content-hash-modes-build-manifest:p1:inst-buildmanifest-return
     Ok((manifest, root))
-    // @cpt-end:cpt-cf-file-storage-algo-content-hash-modes-build-manifest:p1:inst-buildmanifest-return
 }
 
 /// Optional features a backend may declare
@@ -190,8 +186,6 @@ pub trait StorageBackend: Send + Sync {
     /// Initiate a multipart upload for `path`. Returns an opaque backend handle.
     /// Default returns an error — backends must opt-in by overriding this method
     /// and setting `multipart_native: true` in their capabilities.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     async fn initiate_multipart(&self, _path: &str) -> Result<String, DomainError> {
         Err(DomainError::multipart_not_supported(self.id()))
     }
@@ -203,8 +197,6 @@ pub trait StorageBackend: Send + Sync {
     /// flat `sha256(data)` exactly as before — but is threaded through so the
     /// backend can build the offset-manifest at `complete` time without
     /// re-deriving it from a plan it may not retain.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     async fn upload_part(
         &self,
         _path: &str,
@@ -228,8 +220,6 @@ pub trait StorageBackend: Send + Sync {
     /// Returns `(manifest, root)` where `root = sha256(manifest.to_wire_string())`
     /// — the control plane stores `root` as the version's `hash_value` and the
     /// manifest text in `version_hash_manifest`.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     async fn complete_multipart(
         &self,
         _path: &str,
@@ -240,8 +230,6 @@ pub trait StorageBackend: Send + Sync {
     }
 
     /// Abort a multipart upload, discarding all uploaded parts.
-    ///
-    /// @cpt-cf-file-storage-fr-multipart-upload
     async fn abort_multipart(&self, _path: &str, _upload_handle: &str) -> Result<(), DomainError> {
         Err(DomainError::multipart_not_supported(self.id()))
     }
@@ -252,8 +240,6 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// The default implementation returns an empty vec — backends that cannot
     /// enumerate their contents are treated conservatively (unknown = skip).
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
     async fn list_paths(&self) -> Result<Vec<String>, DomainError> {
         Ok(vec![])
     }

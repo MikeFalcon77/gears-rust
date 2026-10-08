@@ -69,8 +69,6 @@ pub struct FileStorageConfig {
     /// Window (seconds) for which an idempotency key is retained.
     /// After this window, a retry with the same key is treated as a fresh request.
     /// Default: 86400 (24 hours).
-    ///
-    /// @cpt-cf-file-storage-fr-upload-idempotency
     #[serde(default = "default_idempotency_ttl_secs")]
     pub idempotency_ttl_secs: u64,
 
@@ -78,8 +76,6 @@ pub struct FileStorageConfig {
     /// alongside the default `local-fs` backend. **Must be `false` by
     /// default** — the in-memory backend loses all content on restart, so it
     /// must be an explicit dev/test opt-in rather than always present.
-    ///
-    /// @cpt-cf-file-storage-fr-backend-config-source
     #[serde(default)]
     pub enable_in_memory_backend: bool,
 
@@ -87,8 +83,6 @@ pub struct FileStorageConfig {
     /// (and `memory` if enabled). Each entry becomes one `S3Backend` in the
     /// registry, keyed by its own `id`. Empty by default — a deployment opts
     /// in explicitly.
-    ///
-    /// @cpt-cf-file-storage-adr-s3-client-selection
     #[serde(default)]
     pub s3_backends: Vec<S3BackendConfig>,
 

@@ -165,9 +165,7 @@ impl StorageBackend for InMemoryBackend {
         _part_offset: u64,
         data: Bytes,
     ) -> Result<(String, Vec<u8>), DomainError> {
-        // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-hash
         let hash_bytes = hash::sha256(&data);
-        // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-hash
         let etag = hex::encode(&hash_bytes);
 
         let mut mp = self.lock_multipart()?;
@@ -209,7 +207,6 @@ impl StorageBackend for InMemoryBackend {
         self.lock_blobs()?
             .insert(final_path, Bytes::from(assembled));
 
-        // @cpt-cf-file-storage-algo-content-hash-modes-build-manifest
         build_manifest_and_root(parts)
     }
 
@@ -219,8 +216,6 @@ impl StorageBackend for InMemoryBackend {
     }
 
     /// Returns all blob paths currently in the store.
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
     async fn list_paths(&self) -> Result<Vec<String>, DomainError> {
         let paths = self.lock_blobs()?.keys().cloned().collect();
         Ok(paths)

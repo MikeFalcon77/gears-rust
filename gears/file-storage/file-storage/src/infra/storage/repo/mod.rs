@@ -73,9 +73,6 @@ pub struct Repos {
     pub retention_rules: RetentionRuleRepo,
     pub multipart: MultipartRepo,
     pub idempotency_keys: IdempotencyRepo,
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub audit: AuditRepo,
-    /// @cpt-cf-file-storage-fr-file-events
     pub events_outbox: EventsOutboxRepo,
 }

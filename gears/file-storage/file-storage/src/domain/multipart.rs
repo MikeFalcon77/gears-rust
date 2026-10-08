@@ -1,6 +1,4 @@
 //! Domain types for multipart upload sessions and parts.
-//!
-//! @cpt-cf-file-storage-fr-multipart-upload
 
 use time::OffsetDateTime;
 use toolkit_macros::domain_model;
@@ -96,8 +94,6 @@ pub struct CompletedMultipartUpload {
 /// or expired session reports state and part accounting only, no resume
 /// URLs (there is nothing left to resume, or the plan's tokens would outlive
 /// the session's own `expires_at` bound).
-///
-/// @cpt-cf-file-storage-fr-multipart-upload
 #[domain_model]
 #[derive(Debug, Clone)]
 pub struct MultipartUploadStatus {
@@ -158,8 +154,6 @@ pub struct MultipartPart {
 ///
 /// The `upload_url` is a sidecar signed URL containing the exact `size` claim.
 /// The client must `PUT` exactly `size` bytes to `upload_url`.
-///
-/// @cpt-cf-file-storage-fr-multipart-upload
 #[domain_model]
 #[derive(Debug, Clone)]
 pub struct MultipartPartPlan {
@@ -174,8 +168,6 @@ pub struct MultipartPartPlan {
 }
 
 /// The server-authoritative parts plan returned by `POST /files/{id}/multipart`.
-///
-/// @cpt-cf-file-storage-fr-multipart-upload
 #[domain_model]
 #[derive(Debug, Clone)]
 pub struct MultipartPlan {

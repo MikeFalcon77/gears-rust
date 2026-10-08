@@ -23,8 +23,6 @@
 //! `ctx.subject_id()`, so any in-flight replay of a pre-migration key is
 //! correctly treated as a subject mismatch (`Forbidden`) rather than being
 //! silently trusted.
-//!
-//! @cpt-cf-file-storage-fr-upload-idempotency
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

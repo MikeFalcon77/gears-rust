@@ -56,9 +56,6 @@ impl Store {
     /// write an audit row — both in a single transaction.
     ///
     /// Returns `true` if a row was removed.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub async fn delete_file(
         &self,
         scope: &AccessScope,
@@ -74,7 +71,6 @@ impl Store {
                 Box::pin(async move {
                     let removed = files.delete(tx, &del_scope, file_id).await?;
                     if removed {
-                        // @cpt-cf-file-storage-nfr-audit-completeness
                         audit_repo.insert(tx, &audit).await?;
                     }
                     Ok::<bool, DomainError>(removed)
@@ -90,9 +86,6 @@ impl Store {
     /// leave a visible file with no version (or partial metadata) behind.
     ///
     /// An audit row is written in the same transaction.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     #[allow(clippy::too_many_arguments)]
     pub async fn create_file_with_pending_version(
         &self,
@@ -149,7 +142,6 @@ impl Store {
                             .upsert(tx, &AccessScope::allow_all(), file_id, key, value, now)
                             .await?;
                     }
-                    // @cpt-cf-file-storage-nfr-audit-completeness
                     audit_repo.insert(tx, &audit).await?;
                     Ok::<(), DomainError>(())
                 })
@@ -167,10 +159,6 @@ impl Store {
     ///
     /// This is the events-aware variant of [`delete_file`]; the original method
     /// is preserved for callers that do not need event enqueuing.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-fr-file-events
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     pub async fn delete_file_with_event(
         &self,
         scope: &AccessScope,
@@ -216,9 +204,6 @@ impl Store {
     /// Returns `true` if the file row was removed; `false` if the guard
     /// failed (a version now exists or content is bound) or the row was
     /// already gone (e.g. a concurrent sweep).
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
-    /// @cpt-cf-file-storage-fr-file-events
     pub async fn delete_orphan_file_with_event(
         &self,
         file_id: Uuid,
@@ -265,10 +250,6 @@ impl Store {
     ///
     /// This is the events-aware variant of [`create_file_with_pending_version`];
     /// the original is preserved for callers that do not need event enqueuing.
-    ///
-    /// @cpt-cf-file-storage-fr-audit-trail
-    /// @cpt-cf-file-storage-fr-file-events
-    /// @cpt-cf-file-storage-nfr-audit-completeness
     #[allow(clippy::too_many_arguments)]
     pub async fn create_file_with_pending_version_and_event(
         &self,
@@ -348,8 +329,6 @@ impl Store {
     /// List file-event rows for a specific file ordered by occurrence time.
     ///
     /// Intended for testing; not exposed on the REST API.
-    ///
-    /// @cpt-cf-file-storage-fr-file-events
     pub async fn list_file_events(
         &self,
         file_id: Uuid,

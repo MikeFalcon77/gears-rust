@@ -367,9 +367,6 @@ impl VersionRepo {
     /// it is aborted by the next sweep step (`sweep_expired_multipart`), and
     /// its version becomes reclaimable on a later sweep once the session row
     /// itself transitions out of `in_progress`.
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
-    /// @cpt-dod:cpt-cf-file-storage-dod-cleanup-live-multipart-guard:p1
     pub async fn list_pending_older_than<C: DBRunner>(
         &self,
         conn: &C,
@@ -412,8 +409,6 @@ impl VersionRepo {
     /// the race and already moved the row past `expected_backend_id`/
     /// `expected_backend_path`) — the caller must re-fetch to distinguish
     /// these.
-    ///
-    /// @cpt-cf-file-storage-fr-backend-migration
     #[allow(clippy::too_many_arguments)]
     pub async fn rebind_backend<C: DBRunner>(
         &self,

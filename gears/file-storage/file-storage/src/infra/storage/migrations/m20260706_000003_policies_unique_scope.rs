@@ -60,10 +60,6 @@
 //! narrowing deletes with no side effects beyond removing the losing
 //! duplicate rows, so re-running this migration's `UP` SQL after it already
 //! succeeded is a no-op (nothing left to delete, indexes already exist).
-//!
-//! @cpt-cf-file-storage-fr-allowed-types-policy
-//! @cpt-cf-file-storage-fr-size-limits-policy
-//! @cpt-cf-file-storage-fr-metadata-limits
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

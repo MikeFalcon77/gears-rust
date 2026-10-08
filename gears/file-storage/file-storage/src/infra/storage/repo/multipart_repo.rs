@@ -227,8 +227,6 @@ impl MultipartRepo {
 
     /// List all `in_progress` upload sessions whose `expires_at` is before `now`.
     /// Used by the orphan-reconciliation sweep to clean up stale sessions.
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
     pub async fn list_expired<C: DBRunner>(
         &self,
         conn: &C,
@@ -258,8 +256,6 @@ impl MultipartRepo {
     /// while it is the live target of a *not-yet-expired* multipart session --
     /// deleting the parent `files` row in that window would `ON DELETE
     /// CASCADE` the still-`in_progress` session out from under the upload.
-    ///
-    /// @cpt-cf-file-storage-fr-orphan-reconciliation
     pub async fn has_in_progress_for_file<C: DBRunner>(
         &self,
         conn: &C,

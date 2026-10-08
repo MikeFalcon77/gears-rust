@@ -711,7 +711,6 @@ impl StorageBackend for S3Backend {
         self.finalize_multipart(path, upload_handle, &etag_parts)
             .await?;
 
-        // @cpt-cf-file-storage-algo-content-hash-modes-build-manifest
         build_manifest_and_root(parts)
     }
 

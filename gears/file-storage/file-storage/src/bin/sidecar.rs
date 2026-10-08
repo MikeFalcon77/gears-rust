@@ -868,15 +868,12 @@ async fn write_multipart_part_native(
     // mismatch is an *undersized* part (client sent fewer bytes than
     // claimed) — a client error, not a body exceeding a size limit, hence
     // `400 Bad Request` rather than `413 Payload Too Large`.
-    // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-size-enforce
     if body_len != max_size {
         return Err(Rejection::new(
             StatusCode::BAD_REQUEST,
             format!("part body length {body_len} does not match token size claim {max_size}"),
         ));
     }
-    // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-size-enforce
-    // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-write-native
     match backend
         .upload_part(
             &claims.backend_path,
@@ -898,7 +895,6 @@ async fn write_multipart_part_native(
             ))
         }
     }
-    // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-write-native
 }
 
 /// Non-native (offset-object) backend write path — see
@@ -909,7 +905,6 @@ async fn write_multipart_part_offset_object(
     part_number: u32,
     body: Body,
 ) -> Result<(u64, String, String), Rejection> {
-    // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-write-offset
     let part_path = format!("{}.part.{}", claims.backend_path, part_number);
     let byte_stream: futures::stream::BoxStream<'_, std::io::Result<bytes::Bytes>> = Box::pin(
         body.into_data_stream()
@@ -937,7 +932,6 @@ async fn write_multipart_part_offset_object(
             ));
         }
     };
-    // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-write-offset
 
     // FEATURE §4, point 2: reject if body length ≠ size claim. The
     // `max_size` guard above only rejects an *oversized* part mid-stream (via
@@ -982,9 +976,6 @@ async fn write_multipart_part_offset_object(
 ///
 /// Idempotent per `(upload_id, part_number)`: a re-PUT with the same token
 /// overwrites the earlier part (safe for resume — ADR-0004 §4).
-///
-/// @cpt-cf-file-storage-fr-multipart-upload
-/// @cpt-dod:cpt-cf-file-storage-dod-multipart-sidecar-enforcement:p1
 async fn upload_multipart_part(
     State(state): State<SidecarState>,
     Path((file_id, version_id, part_number)): Path<(Uuid, Uuid, u32)>,
@@ -992,11 +983,9 @@ async fn upload_multipart_part(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
-    // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-request
     let Some(token) = extract_token(&q, &headers) else {
         return (StatusCode::UNAUTHORIZED, "missing fs-token").into_response();
     };
-    // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-request
     // Sidecar: verify the signed token (asymmetric Ed25519; sidecar cannot mint
     // tokens -- ADR-0004). `inst-part-token-reject` below covers the reject-on-
     // invalid-token branch (FEATURE §2 "Upload a Part" step 3); the verify call
@@ -1009,9 +998,7 @@ async fn upload_multipart_part(
         .verify(&token, time::OffsetDateTime::now_utc())
     {
         Ok(c) => c,
-        // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-token-reject
         Err(e) => return (StatusCode::FORBIDDEN, e.to_string()).into_response(),
-        // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-token-reject
     };
 
     // Verify op and path bindings.
@@ -1064,7 +1051,6 @@ async fn upload_multipart_part(
     // assembles from (P2 0.2 group B — the "report part" fix).
     // `claims.request_id` (P2 1.8) is echoed back as `x-request-id` so both
     // planes' logs for this upload can be correlated.
-    // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-report
     if let Err(rejection) = report_part_with_control_plane(
         &state,
         &token,
@@ -1081,9 +1067,7 @@ async fn upload_multipart_part(
     {
         return rejection.into_response();
     }
-    // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-report
 
-    // @cpt-begin:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-return
     // Return the part hash and ETag so callers can track per-part integrity.
     let body = serde_json::json!({
         "part_number": part_number,
@@ -1092,7 +1076,6 @@ async fn upload_multipart_part(
         "hash": hash_hex,
     });
     (StatusCode::OK, axum::Json(body)).into_response()
-    // @cpt-end:cpt-cf-file-storage-flow-multipart-upload-part:p1:inst-part-return
 }
 
 /// Fallback `Content-Type` for a sidecar download response.

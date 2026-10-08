@@ -178,8 +178,6 @@ impl FileRepo {
     /// advancing `after` to the last returned `file_id`, until it gets a short
     /// page. Keyset (not offset) paging is used so that deleting expired files
     /// mid-sweep does not shift the window and skip rows.
-    ///
-    /// @cpt-cf-file-storage-fr-retention-policies
     pub async fn list_all_for_sweep<C: DBRunner>(
         &self,
         conn: &C,
@@ -204,8 +202,6 @@ impl FileRepo {
 
     /// Update `owner_kind` and `owner_id` for a file row, and bump
     /// `last_modified_at`. Returns `true` if a row was found and updated.
-    ///
-    /// @cpt-cf-file-storage-fr-ownership-transfer
     pub async fn update_owner<C: DBRunner>(
         &self,
         conn: &C,

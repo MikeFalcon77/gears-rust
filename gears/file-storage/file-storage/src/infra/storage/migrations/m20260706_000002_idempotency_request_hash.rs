@@ -30,8 +30,6 @@
 //! trusted. In practice this table's rows expire within
 //! `idempotency_ttl_secs` (default 86400s), so there are no long-lived rows
 //! to backfill.
-//!
-//! @cpt-cf-file-storage-fr-upload-idempotency
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
