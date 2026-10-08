@@ -103,6 +103,58 @@ jobs:
           include_time_in_summary: true
           fail_on_failure: true
 
+      # The PR's checks list shows one line per check: its name and title.
+      # Put the failing test there instead of bare counts, so the
+      # Conversation tab says what broke without opening anything.
+      - name: Name failing tests in check titles
+        if: ${{ !cancelled() && steps.plan.outputs.paths != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          PATHS: ${{ steps.plan.outputs.paths }}
+          NAMES: ${{ steps.plan.outputs.names }}
+        shell: python
+        run: |
+          import glob, json, os, urllib.parse, urllib.request
+          import xml.etree.ElementTree as ET
+
+          api = f"https://api.github.com/repos/{os.environ['REPO']}"
+          headers = {
+              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+              "Accept": "application/vnd.github+json",
+          }
+
+          def call(method, url, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, method=method, headers=headers)
+              with urllib.request.urlopen(req) as resp:
+                  return json.load(resp)
+
+          for pattern, name in zip(os.environ["PATHS"].split("\n"), os.environ["NAMES"].split("\n")):
+              total, failed = 0, []
+              for path in glob.glob(pattern):
+                  for case in ET.parse(path).iter("testcase"):
+                      total += 1
+                      if case.find("failure") is not None or case.find("error") is not None:
+                          short = case.get("classname", "").rsplit("::", 1)[-1].rsplit(".", 1)[-1]
+                          failed.append(f"{short} › {case.get('name')}" if short else case.get("name"))
+              if not failed:
+                  continue
+              more = f" (+{len(failed) - 1} more)" if len(failed) > 1 else ""
+              title = f"{len(failed)} failed: {failed[0]}{more} · {total} tests"
+              query = urllib.parse.urlencode({"check_name": name, "filter": "latest"})
+              runs = call("GET", f"{api}/commits/{os.environ['SHA']}/check-runs?{query}")["check_runs"]
+              if not runs:
+                  print(f"::warning::no check run named {name!r} to retitle")
+                  continue
+              run = runs[0]
+              # `output.summary` is required alongside `title`; resend the one
+              # the reporter wrote. Annotations are kept when omitted.
+              call("PATCH", f"{api}/check-runs/{run['id']}",
+                   {"output": {"title": title[:250], "summary": run["output"]["summary"] or title}})
+              print(f"{name}: {title}")
+
       - name: Report empty test reports
         if: ${{ !cancelled() && steps.plan.outputs.empty != '' }}
         env:
