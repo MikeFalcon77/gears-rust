@@ -148,6 +148,12 @@ class GithubOutputTest(unittest.TestCase):
         self.assertNotIn("\n", line)
         self.assertIn("math is broken%0A  left: 2", line)
 
+    def test_log_block_names_test_location_and_message(self) -> None:
+        counts, failures = junit_enrich.collect(self.path)
+        text = junit_enrich.log_block("unit", counts, failures)
+        self.assertIn("Failed tests in unit: 2 of 3", text)
+        self.assertIn("✗ crate::probe › fails_assert_eq\n    at libs/x/tests/probe.rs:7\n    assertion", text)
+
     def test_summary_links_source(self) -> None:
         counts, failures = junit_enrich.collect(self.path)
         env = {"GITHUB_REPOSITORY": "o/r", "GITHUB_SHA": "abc", "GITHUB_SERVER_URL": "https://github.com"}
