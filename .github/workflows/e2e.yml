@@ -156,6 +156,8 @@ jobs:
 
       # pytest records the assertion but not where it failed; take that from
       # the traceback so the report can annotate the test's source line.
+      # --github also annotates the failures on this job and writes the job
+      # summary, so they show up here without waiting for test-report.yml.
       - name: Add source locations to E2E reports
         if: ${{ !cancelled() }}
         shell: bash
@@ -163,7 +165,7 @@ jobs:
           shopt -s nullglob
           reports=(test-results/e2e/*.xml)
           if [ ${#reports[@]} -gt 0 ]; then
-            python3 tools/scripts/junit_enrich.py "${reports[@]}" \
+            python3 tools/scripts/junit_enrich.py --github "${reports[@]}" \
               || echo "::warning::could not add source locations to the E2E reports"
           fi
 
@@ -304,6 +306,8 @@ jobs:
 
       # pytest records the assertion but not where it failed; take that from
       # the traceback so the report can annotate the test's source line.
+      # --github also annotates the failures on this job and writes the job
+      # summary, so they show up here without waiting for test-report.yml.
       - name: Add source locations to E2E reports
         if: ${{ !cancelled() }}
         shell: bash
@@ -311,7 +315,7 @@ jobs:
           shopt -s nullglob
           reports=(test-results/e2e/*.xml)
           if [ ${#reports[@]} -gt 0 ]; then
-            python3 tools/scripts/junit_enrich.py "${reports[@]}" \
+            python3 tools/scripts/junit_enrich.py --github "${reports[@]}" \
               || echo "::warning::could not add source locations to the E2E reports"
           fi
 

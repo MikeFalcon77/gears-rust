@@ -97,7 +97,8 @@ comma := ,
 # The stale report is removed first: a run that fails to build must leave no
 # report rather than the previous run's. The saved report is then given
 # source locations (tools/scripts/junit_enrich.py; system python3, no venv --
-# best effort, never fails the run). The exit code is nextest's.
+# best effort, never fails the run); inside GitHub Actions it also annotates
+# the failing lines and writes the job summary. The exit code is nextest's.
 define nextest_run
 	@junit="$${CARGO_TARGET_DIR:-target}/nextest/$(NEXTEST_PROFILE)/junit.xml"; \
 	rm -f "$$junit"; \
@@ -105,7 +106,7 @@ define nextest_run
 	if [ -n "$(JUNIT_DIR)" ]; then \
 		mkdir -p "$(JUNIT_DIR)"; \
 		if [ -f "$$junit" ]; then cp "$$junit" "$(JUNIT_DIR)/$(1).xml"; \
-			python3 tools/scripts/junit_enrich.py "$(JUNIT_DIR)/$(1).xml" \
+			python3 tools/scripts/junit_enrich.py $${GITHUB_ACTIONS:+--github} "$(JUNIT_DIR)/$(1).xml" \
 				|| echo "::warning::could not add source locations to the JUnit report for '$(1)'"; \
 		else echo "::warning::nextest produced no JUnit report for '$(1)' (build or setup failure?)"; fi; \
 	fi; \
