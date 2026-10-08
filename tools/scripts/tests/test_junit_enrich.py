@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -108,6 +109,40 @@ class EnrichPytestTest(unittest.TestCase):
         # The call site in the test, not the helper or a third-party frame.
         self.assertEqual((helper.get("file"), helper.get("line")), ("testing/e2e/suites/x/test_probe.py", "17"))
         self.assertEqual(helper.find("failure").get("message"), "AssertionError: bad status 500")
+
+
+class GithubOutputTest(unittest.TestCase):
+    def setUp(self) -> None:
+        tmp = tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-8")
+        tmp.write(REPORT)
+        tmp.close()
+        self.path = tmp.name
+        self.addCleanup(Path(self.path).unlink)
+        junit_enrich.enrich(self.path)
+
+    def test_counts_and_failures(self) -> None:
+        counts, failures = junit_enrich.collect(self.path)
+        self.assertEqual(counts, {"passed": 1, "failed": 2, "skipped": 0, "flaky": 0})
+        located = [f for f in failures if f["file"]][0]
+        self.assertEqual(located["test"], "crate::probe › fails_assert_eq")
+        # The location is not repeated inside the message.
+        self.assertTrue(located["message"].startswith("assertion `left == right` failed"))
+
+    def test_annotation_is_escaped(self) -> None:
+        _, failures = junit_enrich.collect(self.path)
+        line = junit_enrich.annotation([f for f in failures if f["file"]][0])
+        self.assertTrue(line.startswith("::error file=libs/x/tests/probe.rs,line=7,title=crate%3A%3Aprobe › fails_assert_eq::"))
+        self.assertNotIn("\n", line)
+        self.assertIn("math is broken%0A  left: 2", line)
+
+    def test_summary_links_source(self) -> None:
+        counts, failures = junit_enrich.collect(self.path)
+        env = {"GITHUB_REPOSITORY": "o/r", "GITHUB_SHA": "abc", "GITHUB_SERVER_URL": "https://github.com"}
+        with unittest.mock.patch.dict("os.environ", env):
+            text = junit_enrich.summary("unit", counts, failures)
+        self.assertIn("#### ❌ unit — 2 failed, 1 passed, 0 skipped", text)
+        self.assertIn("[libs/x/tests/probe.rs:7](https://github.com/o/r/blob/abc/libs/x/tests/probe.rs#L7)", text)
+        self.assertIn("**crate::probe › times_out**", text)
 
 
 if __name__ == "__main__":
