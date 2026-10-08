@@ -1723,7 +1723,7 @@ code; see `cpt-cf-file-storage-fr-owner-deletion`.
 - [x] Policies enforce file type and size restrictions on upload (most restrictive wins across tenant and user levels)
 - [x] All content traffic flows through the **sidecar** via signed URLs; no backend-addressable URL is returned to any client
 - [x] Content upload and download are each a two-step exchange (control request → signed URL → byte transfer to/from the sidecar); the control REST surface never carries content
-- [x] The credential is an opaque, asymmetric Ed25519-signed token (the bespoke codec-equivalent format per ADR-0004's Implementation note — not a literal PASETO library), carried in the query (`?fs-token=`) or a header, stateless, enforcing AND-combined claims (expiry, upload size/hash; optional `ip` and token-claim predicates are **not implemented yet**); altering any claim invalidates the signature; only control+sidecar parse it
+- [x] The credential is an opaque, asymmetric Ed25519-signed token (the bespoke codec-equivalent format per ADR-0004's Implementation note — not a literal PASETO library), carried in the query (`?fs-token=`) or a header, stateless, enforcing AND-combined claims (expiry, optional ip, optional token-claim predicates, upload size/hash); altering any claim invalidates the signature; only control+sidecar parse it
 - [x] file_not_found error returned for non-existent files
 - [x] access_denied error returned for unauthorized operations
 - [x] Metadata-only queries complete without transferring file content

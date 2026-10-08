@@ -129,11 +129,10 @@ Notes:
   time (gear init fails if `max_page_size` is configured above it), independent of and in addition to the ordinary
   `default_page_size ≤ max_page_size` sanity check. A caller can therefore never receive more than the configured
   `max_page_size` items in one page, and that configured value itself can never exceed 200.
-- `POST /files` and `POST /files/{id}/versions` return `{ file_id, version_id, upload_url }` (`POST /files` with a
-  `multipart` block and a plan of ≥2 parts returns `multipart: { … }` instead of `upload_url`, see above; the
-  control plane creates a `pending` `file_versions` row for `version_id` before returning the URL). The client `PUT`s
-  the bytes to `upload_url` on the sidecar; the sidecar streams them to the backend, measuring size + SHA-256,
-  then calls the control plane's `POST .../versions/{version_id}/finalize` callback (see
+- `POST /files` and `POST /files/{id}/versions` return `{ file_id, version_id, upload_url }` (the control plane
+  creates a `pending` `file_versions` row for `version_id` before returning the URL). The client `PUT`s the bytes to
+  `upload_url` on the sidecar; the sidecar streams them to the backend, measuring size + SHA-256, then calls the
+  control plane's `POST .../versions/{version_id}/finalize` callback (see
   [Data-plane callbacks](#data-plane-callbacks-sidecar--control-plane-s2s-token-authenticated)), which marks the
   version `available`.
 - **Single-part bind outcome headers.** For a file created with `bind: "auto"` (the default),
@@ -146,9 +145,8 @@ Notes:
   bound" — a `bind: "manual"` upload, or an instance that does not auto-bind (e.g. an older instance during a
   rolling update) — and the client must then call `POST /files/{id}/bind` itself; a `200` alone never implies the
   version was bound. An honest `PUT` retry (lost response) is idempotent: `publish_exclusive` is
-  replay-safe and finalize converges a still-`pending` version, or an already-`available` one with matching
-  size/hash, to the same headers — never a 409 (only a replay whose size/hash differs gets `409`, see the status
-  summary) — **regardless of the upload's bind mode**: the sidecar publishes every single-part upload through the
+  replay-safe and finalize converges an already-`available` version with matching size/hash to the same headers —
+  never a 409 — **regardless of the upload's bind mode**: the sidecar publishes every single-part upload through the
   same replay-safe path whether or not the token carries the auto-bind claim, so a `bind: "manual"` retry converges
   exactly like an auto-bind one, simply with no `X-FS-Bound`/`ETag` headers to report (as on the first call). An
   auto-bind retry that WON the CAS on its original call replays that exact `X-FS-Bound: true` + `ETag` outcome, even
@@ -872,8 +870,8 @@ X-FS-Meta-<key>: <value>
 ```
 
 None of the `X-FS-*` headers above are emitted by the sidecar: doing so would require the sidecar to either gain DB
-access or carry substantially more per-request state in the token than it does today. Sidecar-side
-`If-None-Match` → `304` is likewise not implemented (see "P1 — Sidecar" above).
+access or carry substantially more per-request state in the token than it does today. `HEAD` and sidecar-side
+`If-None-Match` → `304` are likewise not implemented (see "P1 — Sidecar" above).
 
 ## Status code summary
 
@@ -940,12 +938,10 @@ access or carry substantially more per-request state in the token than it does t
     `401`/`403`/`404`/`500`, so this `409` is not represented in the generated OpenAPI schema even though the domain
     code returns it.
   - **sidecar `PUT` (replay)**: a `PUT` to an `upload_url` whose `backend_path` already holds a published blob (a
-    token replay after the version was already finalized) never overwrites: `publish_exclusive`'s create-exclusive
-    write refuses to touch the existing object, and the live bytes are never touched. The sidecar still attempts
-    finalize with this attempt's measured size/hash: a retry with the same size/hash converges to `200` (the earlier
-    publish landed but finalize had not yet run, or the version is already `available` — same headers as the first
-    call); a replay whose size/hash differs, a finalize transport failure, or no configured control plane gets
-    `409 Conflict`.
+    genuine token replay after the version was already finalized, as opposed to a benign retry of the same in-flight
+    upload) gets `409 Conflict` from the sidecar itself — `publish_exclusive`'s create-exclusive write refuses to
+    overwrite the existing object, and the live bytes are never touched. A benign retry (the earlier publish landed
+    but finalize had not yet run) instead converges to `200` once finalize succeeds on this attempt.
 
   Note: `update_metadata` (`PATCH /files/{id}`) declares a `409` response in its OpenAPI registration
   (`routes.rs`), but no domain code path returns `DomainError::Conflict` for this handler — its only failure mode

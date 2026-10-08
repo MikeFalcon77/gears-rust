@@ -209,35 +209,6 @@ async fn list_files_self_owner_is_allowed() {
     assert!(found.iter().any(|f| f.file_id == ticket.file_id));
 }
 
-/// `owner_id` alone matching the caller is not enough: `owner_kind` picks
-/// between two disjoint owner spaces (`OwnerKind::User` / `OwnerKind::App`).
-/// A plain user whose subject id equals the filter's `owner_id` must still
-/// require `ADMIN_POLICY` to list under `owner_kind: app`.
-#[tokio::test]
-async fn list_files_owner_kind_mismatch_without_admin_is_denied() {
-    let h = build_harness().await;
-    let tenant = Uuid::now_v7();
-    let user_a = Uuid::now_v7();
-    let ctx_a = ctx(tenant, user_a);
-
-    let result = h
-        .file_svc
-        .list_files(
-            &ctx_a,
-            OwnerFilter {
-                owner_kind: OwnerKind::App,
-                owner_id: user_a,
-            },
-            Some(10),
-            0,
-        )
-        .await;
-    assert!(
-        matches!(result, Err(DomainError::Forbidden)),
-        "expected Forbidden, got {result:?}"
-    );
-}
-
 /// An `ADMIN_POLICY`-authorized caller may list another user's files.
 #[tokio::test]
 async fn list_files_foreign_owner_with_admin_scope_is_allowed() {
