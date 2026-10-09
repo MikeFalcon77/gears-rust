@@ -1060,8 +1060,11 @@ jobs:
         with:
           toolchain: stable
 
+      # Pinned: an unpinned install picked up 0.0.8 on 2026-10-08, whose new
+      # rules (DE0309, DE0904, DE1202) failed this job on every PR. Keep in
+      # sync with CARGO_GEARS_VERSION in the Makefile.
       - name: Install cargo-gears
-        run: cargo install --locked cargo-gears
+        run: cargo install --locked cargo-gears --version 0.0.7
 
       - name: Run architecture lints
         run: cargo gears lint --dylint
