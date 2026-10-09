@@ -23,6 +23,7 @@ workspace = true
 integration = ["toolkit-db/pg"]
 
 [dependencies]
+toolkit-gts = { workspace = true }
 # Trait boundaries of consumed SDKs are `CanonicalError` (ADR 0005).
 toolkit-canonical-errors = { workspace = true }
 settings-service-sdk = { workspace = true }

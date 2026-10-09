@@ -235,7 +235,7 @@ mod tests {
 
     fn spec(steps: Vec<MigrationStep>) -> MigrationSpec {
         MigrationSpec {
-            type_id: "gts.acme.gs._.thing.v1~".to_owned(),
+            type_id: toolkit_gts::gts_id!("acme.gs._.thing.v1~").to_owned(),
             steps,
         }
     }

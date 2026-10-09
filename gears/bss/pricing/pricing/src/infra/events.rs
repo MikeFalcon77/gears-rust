@@ -34,17 +34,18 @@ pub const OUTBOX_TABLE_PREFIX: &str = "bss_pricing_outbox";
 /// The one queue every pricing event is enqueued on.
 pub const QUEUE: &str = "bss_pricing_events";
 /// The broker topic pricing publishes to.
-pub const TOPIC: &str = "gts.cf.core.events.topic.v1~cf.bss.pricing.catalog.v1";
+pub const TOPIC: &str = toolkit_gts::gts_id!("cf.core.events.topic.v1~cf.bss.pricing.catalog.v1");
 /// The producer source of every pricing event.
 pub const SOURCE: &str = "bss-pricing";
 /// `PricesPublished` is about a book.
 pub const PRICE_BOOK_SUBJECT_TYPE: &str =
-    "gts.cf.core.events.subject.v1~cf.bss.pricing.price_book.v1~";
+    toolkit_gts::gts_id!("cf.core.events.subject.v1~cf.bss.pricing.price_book.v1~");
 /// `PlanRevisionPublished` is about a plan: which revision it sells moved.
-pub const PLAN_SUBJECT_TYPE: &str = "gts.cf.core.events.subject.v1~cf.bss.pricing.plan.v1~";
+pub const PLAN_SUBJECT_TYPE: &str =
+    toolkit_gts::gts_id!("cf.core.events.subject.v1~cf.bss.pricing.plan.v1~");
 /// `ApprovalUnitDecided` is about a unit.
 pub const APPROVAL_UNIT_SUBJECT_TYPE: &str =
-    "gts.cf.core.events.subject.v1~cf.bss.pricing.approval_unit.v1~";
+    toolkit_gts::gts_id!("cf.core.events.subject.v1~cf.bss.pricing.approval_unit.v1~");
 const CONTENT_TYPE: &str =
     "application/vnd.constructorfabric.event-broker.producer-outbox+json;version=1";
 
@@ -226,7 +227,8 @@ pub struct PricesPublished {
     pub actor_ref: Uuid,
 }
 impl TypedEvent for PricesPublished {
-    const TYPE_ID: &'static str = "gts.cf.core.events.event.v1~cf.bss.pricing.prices_published.v1~";
+    const TYPE_ID: &'static str =
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.pricing.prices_published.v1~");
     const SUBJECT_TYPE: &'static str = PRICE_BOOK_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
@@ -262,7 +264,7 @@ pub struct PlanRevisionPublished {
 }
 impl TypedEvent for PlanRevisionPublished {
     const TYPE_ID: &'static str =
-        "gts.cf.core.events.event.v1~cf.bss.pricing.plan_revision_published.v1~";
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.pricing.plan_revision_published.v1~");
     const SUBJECT_TYPE: &'static str = PLAN_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
@@ -290,7 +292,7 @@ pub struct ApprovalUnitDecided {
 }
 impl TypedEvent for ApprovalUnitDecided {
     const TYPE_ID: &'static str =
-        "gts.cf.core.events.event.v1~cf.bss.pricing.approval_unit_decided.v1~";
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.pricing.approval_unit_decided.v1~");
     const SUBJECT_TYPE: &'static str = APPROVAL_UNIT_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {

@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// [`INTERACTIVE_SUBJECT_TYPES`] — and an unlabelled one — is a service
 /// principal for the purposes of step-up: no ceremony a machine performs
 /// proves that a person is present.
-pub const USER_SUBJECT_TYPE: &str = "gts.cf.core.security.subject_user.v1~";
+pub const USER_SUBJECT_TYPE: &str = toolkit_gts::gts_id!("cf.core.security.subject_user.v1~");
 
 /// Subject types that denote an interactive human session.
 ///

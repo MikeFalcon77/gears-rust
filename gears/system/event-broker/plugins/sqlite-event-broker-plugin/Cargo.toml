@@ -39,5 +39,7 @@ sea-orm-migration = { workspace = true }
 toolkit-db = { workspace = true, features = ["sqlite"] }
 toolkit-db-macros = { workspace = true }
 
+toolkit-gts = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }

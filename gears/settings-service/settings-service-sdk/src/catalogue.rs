@@ -36,8 +36,13 @@ use toolkit_gts::InventoryTypeSchema;
 // A prefix, not an identifier: DE0901 parses any `gts.`-prefixed literal as a
 // whole GTS id and counts four tokens where a complete one has five. The
 // catalogue's own ids below are complete and pass; this is the string they
-// start with.
-#[allow(unknown_lints, de0901_gts_string_pattern)]
+// start with. For the same reason it cannot be built with `gts_id!`, which
+// validates a complete id, so DE0904 is allowed here too.
+#[allow(
+    unknown_lints,
+    de0901_gts_string_pattern,
+    de0904_no_hardcoded_gts_prefix
+)]
 pub const VALUE_TYPE_PREFIX: &str = "gts.cf.core.settings.type_";
 
 /// One catalogue entry: the type id and the schema it registers.

@@ -16,7 +16,7 @@ use rust_decimal::Decimal;
 use std::collections::{BTreeMap, BTreeSet};
 use toolkit_canonical_errors::CanonicalError;
 
-#[toolkit_canonical_errors::resource_error("gts.cf.bss.pricing.plan.v1~")]
+#[toolkit_canonical_errors::resource_error(gts_id!("cf.bss.pricing.plan.v1~"))]
 struct BindingResource;
 
 /// Restricted JSON: numeric meaning is always exact text before serialization.

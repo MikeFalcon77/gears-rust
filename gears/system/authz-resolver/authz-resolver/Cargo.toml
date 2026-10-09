@@ -54,6 +54,7 @@ inventory = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+toolkit-gts = { workspace = true }
 # Async test harness + supporting types for the gear/local-client unit tests.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-util = { workspace = true }

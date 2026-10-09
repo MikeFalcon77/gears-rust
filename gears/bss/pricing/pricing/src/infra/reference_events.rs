@@ -23,10 +23,11 @@ pub struct PriceBookEntryReferenceLost {
     pub actor_ref: Uuid,
 }
 impl TypedEvent for PriceBookEntryReferenceLost {
-    const TYPE_ID: &'static str =
-        "gts.cf.core.events.event.v1~cf.bss.pricing.price_book_entry_reference_lost.v1~";
+    const TYPE_ID: &'static str = toolkit_gts::gts_id!(
+        "cf.core.events.event.v1~cf.bss.pricing.price_book_entry_reference_lost.v1~"
+    );
     const SUBJECT_TYPE: &'static str =
-        "gts.cf.core.events.subject.v1~cf.bss.pricing.price_book_entry.v1~";
+        toolkit_gts::gts_id!("cf.core.events.subject.v1~cf.bss.pricing.price_book_entry.v1~");
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
         Cow::Owned(self.price_book_entry_id.to_string())
@@ -74,8 +75,9 @@ pub struct PlanReferenceLost {
 }
 impl TypedEvent for PlanReferenceLost {
     const TYPE_ID: &'static str =
-        "gts.cf.core.events.event.v1~cf.bss.pricing.plan_reference_lost.v1~";
-    const SUBJECT_TYPE: &'static str = "gts.cf.core.events.subject.v1~cf.bss.pricing.plan_item.v1~";
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.pricing.plan_reference_lost.v1~");
+    const SUBJECT_TYPE: &'static str =
+        toolkit_gts::gts_id!("cf.core.events.subject.v1~cf.bss.pricing.plan_item.v1~");
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
         Cow::Owned(self.item_id.to_string())

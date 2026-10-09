@@ -24,10 +24,20 @@ use sea_orm_migration::prelude::*;
 // Written out rather than taken from `settings-service-sdk`: a migration is a
 // record of one move that already happened. If the catalogue is ever renamed
 // again, this must still rewrite `toolkit` to `core` on the databases that
-// stopped there, not chase whatever the constant then holds.
-#[allow(unknown_lints, de0901_gts_string_pattern)]
+// stopped there, not chase whatever the constant then holds. The same holds
+// for the prefix itself, and `gts_id!` cannot build a partial id anyway, so
+// DE0904 is allowed too.
+#[allow(
+    unknown_lints,
+    de0901_gts_string_pattern,
+    de0904_no_hardcoded_gts_prefix
+)]
 const OLD: &str = "gts.cf.toolkit.settings.type_";
-#[allow(unknown_lints, de0901_gts_string_pattern)]
+#[allow(
+    unknown_lints,
+    de0901_gts_string_pattern,
+    de0904_no_hardcoded_gts_prefix
+)]
 const NEW: &str = "gts.cf.core.settings.type_";
 
 #[derive(DeriveMigrationName)]

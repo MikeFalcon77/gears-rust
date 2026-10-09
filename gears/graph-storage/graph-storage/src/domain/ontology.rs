@@ -986,18 +986,26 @@ mod tests {
     /// platform's behaviour, not ours, so they are pinned here.
     #[test]
     fn a_pattern_admits_what_derives_from_it_and_nothing_else() {
-        let commit =
-            "gts.cf.core.graph.node.v1~cf.core.graph.reference_node.v1~acme.scm._.commit.v1~";
+        let commit = toolkit_gts::gts_id!(
+            "cf.core.graph.node.v1~cf.core.graph.reference_node.v1~acme.scm._.commit.v1~"
+        );
 
         assert_eq!(
-            matches_any_pattern(commit, &["gts.cf.core.graph.node.v1~".to_owned()]).ok(),
+            matches_any_pattern(
+                commit,
+                &[toolkit_gts::gts_id!("cf.core.graph.node.v1~").to_owned()]
+            )
+            .ok(),
             Some(true),
             "the base every node type derives from admits them all"
         );
         assert_eq!(
             matches_any_pattern(
                 commit,
-                &["gts.cf.core.graph.node.v1~cf.core.graph.owned_node.v1~".to_owned()]
+                &[
+                    toolkit_gts::gts_id!("cf.core.graph.node.v1~cf.core.graph.owned_node.v1~")
+                        .to_owned()
+                ]
             )
             .ok(),
             Some(false),

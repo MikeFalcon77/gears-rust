@@ -786,7 +786,8 @@ mod tests {
 
     const NIL: uuid::Uuid = uuid::Uuid::nil();
 
-    const MEMBERSHIP_TYPE: &str = "gts.cf.core.rg.type.v1~example.core.rg.member.v1~";
+    const MEMBERSHIP_TYPE: &str =
+        toolkit_gts::gts_id!("cf.core.rg.type.v1~example.core.rg.member.v1~");
 
     fn one(filter: ScopeFilter) -> AccessScope {
         AccessScope::from_constraints(vec![ScopeConstraint::new(vec![filter])])
@@ -836,26 +837,26 @@ mod tests {
     fn table_addressing_is_unchanged_for_every_arm() {
         use custom_prop_entity::Entity as E;
 
-        let cases: Vec<(AccessScope, &str)> = vec![
+        let cases: Vec<(AccessScope, String)> = vec![
             (
                 AccessScope::for_tenant(NIL),
-                r#"SELECT 1 FROM "t" WHERE "custom_prop_test"."tenant_id" IN ('00000000-0000-0000-0000-000000000000')"#,
+                r#"SELECT 1 FROM "t" WHERE "custom_prop_test"."tenant_id" IN ('00000000-0000-0000-0000-000000000000')"#.to_owned(),
             ),
             (
                 one(ScopeFilter::eq(pep_properties::OWNER_TENANT_ID, NIL)),
-                r#"SELECT 1 FROM "t" WHERE "custom_prop_test"."tenant_id" = '00000000-0000-0000-0000-000000000000'"#,
+                r#"SELECT 1 FROM "t" WHERE "custom_prop_test"."tenant_id" = '00000000-0000-0000-0000-000000000000'"#.to_owned(),
             ),
             (
                 group_scope(),
-                r#"SELECT 1 FROM "t" WHERE CAST("custom_prop_test"."id" AS text) IN (SELECT "membership"."resource_id" FROM "resource_group_membership" AS "membership" WHERE "membership"."group_id" IN ('00000000-0000-0000-0000-000000000007') AND "membership"."gts_type_id" IN (SELECT "member_type"."id" FROM "gts_type" AS "member_type" WHERE "member_type"."schema_id" = 'gts.cf.core.rg.type.v1~example.core.rg.member.v1~')) AND "custom_prop_test"."tenant_id" = '00000000-0000-0000-0000-000000000000'"#,
+                format!(r#"SELECT 1 FROM "t" WHERE CAST("custom_prop_test"."id" AS text) IN (SELECT "membership"."resource_id" FROM "resource_group_membership" AS "membership" WHERE "membership"."group_id" IN ('00000000-0000-0000-0000-000000000007') AND "membership"."gts_type_id" IN (SELECT "member_type"."id" FROM "gts_type" AS "member_type" WHERE "member_type"."schema_id" = '{MEMBERSHIP_TYPE}')) AND "custom_prop_test"."tenant_id" = '00000000-0000-0000-0000-000000000000'"#),
             ),
             (
                 group_subtree_scope(),
-                r#"SELECT 1 FROM "t" WHERE CAST("custom_prop_test"."id" AS text) IN (SELECT "membership"."resource_id" FROM "resource_group_membership" AS "membership" WHERE "membership"."group_id" IN (SELECT "group_closure"."descendant_id" FROM "resource_group_closure" AS "group_closure" WHERE "group_closure"."ancestor_id" IN ('00000000-0000-0000-0000-000000000007')) AND "membership"."gts_type_id" IN (SELECT "member_type"."id" FROM "gts_type" AS "member_type" WHERE "member_type"."schema_id" = 'gts.cf.core.rg.type.v1~example.core.rg.member.v1~')) AND "custom_prop_test"."tenant_id" = '00000000-0000-0000-0000-000000000000'"#,
+                format!(r#"SELECT 1 FROM "t" WHERE CAST("custom_prop_test"."id" AS text) IN (SELECT "membership"."resource_id" FROM "resource_group_membership" AS "membership" WHERE "membership"."group_id" IN (SELECT "group_closure"."descendant_id" FROM "resource_group_closure" AS "group_closure" WHERE "group_closure"."ancestor_id" IN ('00000000-0000-0000-0000-000000000007')) AND "membership"."gts_type_id" IN (SELECT "member_type"."id" FROM "gts_type" AS "member_type" WHERE "member_type"."schema_id" = '{MEMBERSHIP_TYPE}')) AND "custom_prop_test"."tenant_id" = '00000000-0000-0000-0000-000000000000'"#),
             ),
             (
                 tenant_subtree_scope(),
-                r#"SELECT 1 FROM "t" WHERE "custom_prop_test"."tenant_id" IN (SELECT "descendant_id" FROM "tenant_closure" WHERE "ancestor_id" = '00000000-0000-0000-0000-000000000000' AND "barrier" = 0)"#,
+                r#"SELECT 1 FROM "t" WHERE "custom_prop_test"."tenant_id" IN (SELECT "descendant_id" FROM "tenant_closure" WHERE "ancestor_id" = '00000000-0000-0000-0000-000000000000' AND "barrier" = 0)"#.to_owned(),
             ),
         ];
 

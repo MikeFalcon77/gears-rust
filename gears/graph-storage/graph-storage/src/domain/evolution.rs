@@ -329,7 +329,7 @@ mod tests {
             "$schema": "http://json-schema.org/draft-07/schema#",
             "type": "object",
             "allOf": [
-                { "$ref": "gts://gts.acme.gs._.evolution_base.v1~" },
+                { "$ref": toolkit_gts::gts_uri!("acme.gs._.evolution_base.v1~") },
                 { "type": "object", "properties": { "payload": payload } }
             ]
         })
@@ -337,9 +337,9 @@ mod tests {
 
     fn chain() -> Vec<(String, Value)> {
         vec![(
-            "gts.acme.gs._.evolution_base.v1~".to_owned(),
+            toolkit_gts::gts_id!("acme.gs._.evolution_base.v1~").to_owned(),
             json!({
-                "$id": "gts://gts.acme.gs._.evolution_base.v1~",
+                "$id": toolkit_gts::gts_uri!("acme.gs._.evolution_base.v1~"),
                 "$schema": "http://json-schema.org/draft-07/schema#",
                 "type": "object",
                 "properties": { "node_key": { "type": "string" }, "payload": { "type": "object" } }
@@ -564,7 +564,7 @@ mod tests {
     #[test]
     fn a_refusal_names_the_offending_locations() {
         let reason = refusal_reason(
-            "gts.acme.gs._.evolution_base.v1~acme.gs._.thing.v1~",
+            toolkit_gts::gts_id!("acme.gs._.evolution_base.v1~acme.gs._.thing.v1~"),
             TypeChangeState::Incompatible,
             &[
                 SchemaDiagnostic {

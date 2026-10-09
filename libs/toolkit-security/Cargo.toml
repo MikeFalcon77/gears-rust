@@ -41,6 +41,12 @@ sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# `gts_id!` for a test constant. Path-only, no version on purpose — not
+# `workspace = true`, which would carry one: cargo drops a path-only
+# dev-dependency from the published manifest. `toolkit-gts` is not a normal
+# dependency of this crate, so nothing orders its release before ours, and a
+# versioned dev-dependency on it can fail the publish.
+toolkit-gts = { package = "cf-gears-toolkit-gts", path = "../toolkit-gts" }
 trybuild = { workspace = true }
 # "test-util" enables `start_paused`, which lets the backend-timeout tests run
 # on virtual time instead of spending the real deadline waiting.

@@ -195,8 +195,11 @@ mod tests {
     use crate::domain::ontology::BASE_SCHEMAS;
     use crate::infra::fake_store::{FakeGraphEngine, FakeGraphStore};
 
-    const OWNED: &str = "gts.cf.core.graph.node.v1~cf.core.graph.owned_node.v1~acme.walk._.n.v1~";
-    const LINK: &str = "gts.cf.core.graph.edge.v1~cf.core.graph.static_edge.v1~acme.walk._.e.v1~";
+    const OWNED: &str =
+        toolkit_gts::gts_id!("cf.core.graph.node.v1~cf.core.graph.owned_node.v1~acme.walk._.n.v1~");
+    const LINK: &str = toolkit_gts::gts_id!(
+        "cf.core.graph.edge.v1~cf.core.graph.static_edge.v1~acme.walk._.e.v1~"
+    );
 
     fn derived(type_id: &str, family: &str) -> TypeRegistration {
         TypeRegistration {
@@ -243,11 +246,11 @@ mod tests {
             .collect();
         types.push(derived(
             OWNED,
-            "gts.cf.core.graph.node.v1~cf.core.graph.owned_node.v1~",
+            toolkit_gts::gts_id!("cf.core.graph.node.v1~cf.core.graph.owned_node.v1~"),
         ));
         types.push(derived(
             LINK,
-            "gts.cf.core.graph.edge.v1~cf.core.graph.static_edge.v1~",
+            toolkit_gts::gts_id!("cf.core.graph.edge.v1~cf.core.graph.static_edge.v1~"),
         ));
         store
             .register_types(&ctx, types)

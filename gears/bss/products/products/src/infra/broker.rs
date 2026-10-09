@@ -7,15 +7,16 @@ use std::sync::Arc;
 use toolkit_security::SecurityContext;
 use uuid::Uuid;
 
-pub const TOPIC: &str = "gts.cf.core.events.topic.v1~cf.bss.products.catalog.v1";
+pub const TOPIC: &str = toolkit_gts::gts_id!("cf.core.events.topic.v1~cf.bss.products.catalog.v1");
 /// Every products event type this producer declares.
-const EVENT_TYPE_WILDCARD: &str = "gts.cf.core.events.event.v1~cf.bss.products.*";
+const EVENT_TYPE_WILDCARD: &str = toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.products.*");
 pub const SOURCE: &str = "bss-products";
-pub const SKU_SUBJECT_TYPE: &str = "gts.cf.core.events.subject.v1~cf.bss.products.sku.v1~";
+pub const SKU_SUBJECT_TYPE: &str =
+    toolkit_gts::gts_id!("cf.core.events.subject.v1~cf.bss.products.sku.v1~");
 
 /// Approval-unit event subject; SKU events retain the existing subject type.
 pub const APPROVAL_UNIT_SUBJECT_TYPE: &str =
-    "gts.cf.core.events.subject.v1~cf.bss.products.approval_unit.v1~";
+    toolkit_gts::gts_id!("cf.core.events.subject.v1~cf.bss.products.approval_unit.v1~");
 
 /// A SKU was published.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,7 +28,8 @@ pub(crate) struct SkuPublished {
     pub actor_ref: Uuid,
 }
 impl TypedEvent for SkuPublished {
-    const TYPE_ID: &'static str = "gts.cf.core.events.event.v1~cf.bss.products.sku_published.v1~";
+    const TYPE_ID: &'static str =
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.products.sku_published.v1~");
     const SUBJECT_TYPE: &'static str = SKU_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
@@ -54,7 +56,8 @@ pub(crate) struct SkuChanged {
     pub actor_ref: Uuid,
 }
 impl TypedEvent for SkuChanged {
-    const TYPE_ID: &'static str = "gts.cf.core.events.event.v1~cf.bss.products.sku_changed.v1~";
+    const TYPE_ID: &'static str =
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.products.sku_changed.v1~");
     const SUBJECT_TYPE: &'static str = SKU_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
@@ -77,7 +80,8 @@ pub(crate) struct SkuRetired {
     pub actor_ref: Uuid,
 }
 impl TypedEvent for SkuRetired {
-    const TYPE_ID: &'static str = "gts.cf.core.events.event.v1~cf.bss.products.sku_retired.v1~";
+    const TYPE_ID: &'static str =
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.products.sku_retired.v1~");
     const SUBJECT_TYPE: &'static str = SKU_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
@@ -104,7 +108,7 @@ pub(crate) struct ApprovalUnitDecided {
 }
 impl TypedEvent for ApprovalUnitDecided {
     const TYPE_ID: &'static str =
-        "gts.cf.core.events.event.v1~cf.bss.products.approval_unit_decided.v1~";
+        toolkit_gts::gts_id!("cf.core.events.event.v1~cf.bss.products.approval_unit_decided.v1~");
     const SUBJECT_TYPE: &'static str = APPROVAL_UNIT_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {
@@ -132,8 +136,9 @@ pub(crate) struct ReferenceForceReleased {
     pub reason: String,
 }
 impl TypedEvent for ReferenceForceReleased {
-    const TYPE_ID: &'static str =
-        "gts.cf.core.events.event.v1~cf.bss.products.reference_force_released.v1~";
+    const TYPE_ID: &'static str = toolkit_gts::gts_id!(
+        "cf.core.events.event.v1~cf.bss.products.reference_force_released.v1~"
+    );
     const SUBJECT_TYPE: &'static str = SKU_SUBJECT_TYPE;
     const SOURCE: &'static str = SOURCE;
     fn subject(&self) -> Cow<'_, str> {

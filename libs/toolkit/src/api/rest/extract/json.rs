@@ -71,9 +71,9 @@ mod tests {
 
     use super::Json;
 
-    const RESOURCE_TYPE: &str = "gts.cf.core.http.request.v1~";
+    const RESOURCE_TYPE: &str = toolkit_gts::gts_id!("cf.core.http.request.v1~");
     const INVALID_ARGUMENT_TYPE: &str =
-        "gts://gts.cf.core.errors.err.v1~cf.core.err.invalid_argument.v1~";
+        toolkit_gts::gts_uri!("cf.core.errors.err.v1~cf.core.err.invalid_argument.v1~");
 
     #[derive(Debug, Deserialize, Serialize)]
     #[serde(deny_unknown_fields)]

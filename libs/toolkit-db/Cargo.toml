@@ -147,6 +147,7 @@ required-features = ["_any-backend"]
 
 [dev-dependencies]
 strum = { workspace = true }
+toolkit-gts = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 tempfile = { workspace = true }
 toolkit-utils = { workspace = true, features = ["serde"] }
