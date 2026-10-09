@@ -1061,7 +1061,7 @@ jobs:
           toolchain: stable
 
       - name: Install cargo-gears
-        run: cargo install --locked cargo-gears
+        run: cargo install --locked cargo-gears@0.0.8
 
       - name: Run architecture lints
         run: cargo gears lint --dylint

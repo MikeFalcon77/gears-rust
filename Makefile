@@ -69,7 +69,7 @@ endef
 # Minimum tool versions — checked via `cargo gears tools check-version`.
 DENY_MIN_VERSION := 0.20.0
 NEXTEST_MIN_VERSION := 0.9.130
-CARGO_GEARS_MIN_VERSION := 0.0.6
+CARGO_GEARS_VERSION := 0.0.8
 
 # check_tool_version(tool, requirement)
 # Verify a tool satisfies a semver requirement. Exits with an error if not.
@@ -216,7 +216,7 @@ setup: .setup-stamp py-env
 	cargo install lychee
 	cargo install cargo-geiger
 	cargo install cargo-deny
-	cargo install cargo-gears
+	cargo install --locked cargo-gears@$(CARGO_GEARS_VERSION)
 	cargo install cargo-fuzz
 	cargo install cargo-hack
 	cargo install --locked cargo-shear --version $(SHEAR_VERSION)
@@ -391,8 +391,8 @@ gts-docs:
 
 install-tools:
 	$(call print_target_banner)
-	@cargo gears tools check-version cargo-gears '>=$(CARGO_GEARS_MIN_VERSION)' >/dev/null 2>&1 \
-	|| (echo "Installing cargo-gears >= $(CARGO_GEARS_MIN_VERSION)..." && cargo install cargo-gears)
+	@cargo gears tools check-version cargo-gears '>=$(CARGO_GEARS_VERSION)' >/dev/null 2>&1 \
+	|| (echo "Installing cargo-gears >= $(CARGO_GEARS_VERSION)..." && cargo install --locked cargo-gears@$(CARGO_GEARS_VERSION))
 	@cargo gears tools check-version cargo-nextest '>=$(NEXTEST_MIN_VERSION)' >/dev/null 2>&1 \
 	|| (echo "Installing cargo-nextest >= $(NEXTEST_MIN_VERSION)..." && cargo install --locked cargo-nextest)
 	@cargo gears tools check-version cargo-deny '>=$(DENY_MIN_VERSION)' >/dev/null 2>&1 \
