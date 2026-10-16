@@ -158,3 +158,7 @@ mod value_surface_tests;
 #[cfg(test)]
 #[path = "boundary_surface_tests.rs"]
 mod boundary_surface_tests;
+
+#[cfg(test)]
+#[path = "history_actor_names_tests.rs"]
+mod history_actor_names_tests;
