@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the cluster gear.
 #
 # Projected from #[toolkit::gear]: id and runtime_caps. The attribute declares
@@ -45,6 +47,8 @@
 # of that would be an inference rather than a fact. Declared deliberately.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/cluster/cluster"),
     maturity = "preview",
     name = "Cluster Coordination",
     description = "Distributed cache, leader election, and locks with pluggable coordination backends.",

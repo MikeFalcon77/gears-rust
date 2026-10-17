@@ -1,12 +1,16 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox description for the llm-gateway gear, which has no crate yet.
 #
-# `maturity = "design"`: listed in the catalogue with its documents, and not
-# usable in a product (GBX0321). When the crate exists, describe it beside the
-# crate instead -- `package = cargo(...)`, no `maturity`, no `id` (projected
-# from #[toolkit::gear] then) -- and delete this file.
+# `implementation = "design"`: listed in the catalogue with its documents, and
+# not usable in a product (GBX0321). When the crate exists, describe it beside
+# the crate instead -- `package = cargo(...)` and a `maturity`, no `id`
+# (projected from #[toolkit::gear] then) -- and delete this file.
 
 gear(
-    maturity = "design",
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/llm-gateway"),
+    implementation = "design",
     id = "llm-gateway",
     name = "LLM Gateway",
     description = "Unified LLM access with multimodal support, tool calling, and governance controls.",
@@ -18,4 +22,25 @@ gear(
         lib = "llm_gateway_sdk",
         path = "llm-gateway-sdk",
     ),
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("chat completion routed to configured provider", priority = "p1"),
+        scenario("streaming chat completion (SSE)", priority = "p1"),
+        scenario("embeddings generation", priority = "p1"),
+        scenario("multimodal input/output (vision, audio, video, documents)", priority = "p1"),
+        scenario("tool/function calling with schema resolution", priority = "p1"),
+        scenario("structured output with schema validation", priority = "p1"),
+        scenario("model discovery (delegation to Models Registry)", priority = "p1"),
+        scenario("provider fallback on failure", priority = "p2"),
+        scenario("retry with exponential backoff", priority = "p2"),
+        scenario("request/response interceptors (hook plugins)", priority = "p2"),
+        scenario("per-tenant budget enforcement (usage plugin)", priority = "p2"),
+        scenario("rate limiting (tenant and user levels)", priority = "p2"),
+        scenario("async jobs for long-running operations", priority = "p2"),
+        scenario("realtime audio (WebSocket)", priority = "p2"),
+        scenario("request cancellation", priority = "p2"),
+        scenario("cost/latency-aware routing", priority = "p3"),
+        scenario("embeddings batching", priority = "p3"),
+        scenario("audit events (audit plugin)", priority = "p4"),
+    ],
 )

@@ -1,9 +1,13 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the grpc-hub gear.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (stateful, system,
 # grpc_hub), lifecycle (entry = "serve", await_ready -- note no stop_timeout).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/grpc-hub"),
     maturity = "preview",
     name = "gRPC Hub",
     description = "Internal gRPC transport hub for out-of-process inter-gear communication.",

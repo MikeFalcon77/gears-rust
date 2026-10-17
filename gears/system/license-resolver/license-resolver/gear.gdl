@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the License Resolver.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (system), colocated_deps
@@ -5,7 +7,10 @@
 # selector choosing which registered plugin answers.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/license-resolver/license-resolver"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "License Resolver",
     description = "Abstraction layer for license feature checks with caching and metrics collection.",
     category = "core-platform-integration",
@@ -32,4 +37,9 @@ gear(
 
     # The selector: which registered plugin instance this host answers with.
     config_schema = config(exposes = ["vendor"]),
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("license check for a subject/resource pair", priority = "p1", done = True),
+        scenario("helpers for registering the well-known `SecurityContext` subject contracts (user, tenant)", priority = "p2"),
+    ],
 )

@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for Plan & Price Modeling.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (db, rest, stateful),
@@ -5,7 +7,10 @@
 # lifecycle (entry `serve`, stop timeout 30s).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/bss/pricing/pricing"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "Plan & Price Modeling",
     description = "Authoritative catalog for subscription plans, price structures, and billing descriptors.",
     category = "bss",
@@ -30,4 +35,16 @@ gear(
 
     # `test-support` is the ledger's arrangement: a test harness, never shipped.
     cargo_features = [],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("plan definition with billing cycles and plan types", priority = "p1"),
+        scenario("price structure and model kinds (flat, per_unit, tiered, volume, package, hybrid)", priority = "p1"),
+        scenario("plan composition, descriptors, and billing phases", priority = "p1"),
+        scenario("multi-currency, regional, and tax-display pricing", priority = "p2"),
+        scenario("price window linkage and effective-dated price schedules", priority = "p2"),
+        scenario("publish validation, approval workflow, and plan lifecycle events", priority = "p2"),
+        scenario("price overlays and segment-based pricing", priority = "p3"),
+        scenario("plan lifecycle: retirement, grandfathering, and scheduled migration", priority = "p3"),
+        scenario("advanced pricing primitives and promotion rules", priority = "p4"),
+    ],
 )

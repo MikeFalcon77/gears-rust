@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the Chat Engine.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (db, rest, stateful),
@@ -13,7 +15,10 @@
 # could fill, so none is declared.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/chat-engine/chat-engine"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "Chat Engine",
     description = "Multi-tenant conversational infrastructure with plugin-driven backend message processing.",
     category = "gen-ai",
@@ -48,4 +53,13 @@ gear(
     # feature means something only where there are replicas and a Kubernetes
     # API to lease from.
     cargo_features = [feature("k8s", kinds = ["kubernetes"])],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("create chat sessions and append messages", priority = "p1"),
+        scenario("chat messages interceptors and custom hooks support", priority = "p2"),
+        scenario("streaming assistant responses with tool-call metadata", priority = "p2"),
+        scenario("multi-tenant retention, export, and compliance controls", priority = "p3"),
+        scenario("conversation evaluation and quality metrics integration", priority = "p4"),
+        scenario("enterprise-grade auditability and policy enforcement across conversations", priority = "p5"),
+    ],
 )

@@ -1,12 +1,16 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox description for the model-registry gear, which has no crate yet.
 #
-# `maturity = "design"`: listed in the catalogue with its documents, and not
-# usable in a product (GBX0321). When the crate exists, describe it beside the
-# crate instead -- `package = cargo(...)`, no `maturity`, no `id` (projected
-# from #[toolkit::gear] then) -- and delete this file.
+# `implementation = "design"`: listed in the catalogue with its documents, and
+# not usable in a product (GBX0321). When the crate exists, describe it beside
+# the crate instead -- `package = cargo(...)` and a `maturity`, no `id`
+# (projected from #[toolkit::gear] then) -- and delete this file.
 
 gear(
-    maturity = "design",
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/model-registry"),
+    implementation = "design",
     id = "model-registry",
     name = "Models Registry",
     description = "Catalog of available models with tenant-level availability and approval workflows.",
@@ -18,4 +22,14 @@ gear(
         lib = "model_registry_sdk",
         path = "model-registry-sdk",
     ),
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("get tenant model (availability check)", priority = "p1"),
+        scenario("list tenant models with filtering", priority = "p1"),
+        scenario("model discovery from providers (via Outbound API Gateway)", priority = "p2"),
+        scenario("model approval workflow (pending → approved | rejected | revoked)", priority = "p2"),
+        scenario("capability tagging (embeddings, vision, tools, function calling)", priority = "p2"),
+        scenario("auto-approval configuration per tenant/provider", priority = "p3"),
+        scenario("model lifecycle tracking (deprecated, archived)", priority = "p4"),
+    ],
 )

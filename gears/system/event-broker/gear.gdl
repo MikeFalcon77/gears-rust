@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the event-broker gear.
 #
 # Under ADR cpt-gearbox-adr-macro-projected-catalogue the Rust attributes keep
@@ -12,7 +14,10 @@
 # Declaring any of them here is GBX0210, which names the owning attribute.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/event-broker"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "Events Broker",
     description = "Durable event streaming with typed topics, pluggable storage, and consumer groups.",
     category = "core-functionality",
@@ -79,4 +84,21 @@ gear(
     #                      #[toolkit::consumes] anywhere in the tree.
     #   cargo_features  -- `cf-gears-event-broker` has no [features] section, and
     #                      absent is not the same answer as an empty list.
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("publish and subscribe to typed events", priority = "p1"),
+        scenario("integration with GTS and authz", priority = "p1"),
+        scenario("support custom plugins for events persistency (per topic)", priority = "p2"),
+        scenario("support in-memory filtering", priority = "p2"),
+        scenario("provide delivery retries, dead-letter handling, and replay", priority = "p3"),
+        scenario("enforce event-contract governance across gears", priority = "p4"),
+        scenario("p0 - SDK + in-memory mock broker landed against a frozen wire contract (openapi + schemas)", done = True),
+        scenario("ingest: single/batch publish, per-topic outbox, idempotent producers (chained/monotonic/stateless), partition + sequence assignment", priority = "p1"),
+        scenario("storage backend trait + first backend (Postgres): retention floor, durable offsets and producer cursors, pluggable for additional backends", priority = "p1"),
+        scenario("dispatcher: consumer-group rebalance + topology versioning, per-partition cursor/frontier tracking, per-member CEL filtering, at-least-once fan-out", priority = "p2"),
+        scenario("delivery: JOIN/subscription lifecycle, multipart/mixed + SSE streaming, seek + offset commit, graceful terminal frames", priority = "p2"),
+        scenario("performance suite: publish-throughput and end-to-end-latency benchmarks, load/soak under rebalance, backpressure + DoS limits, CI regression gates", priority = "p3"),
+        scenario("dead-letter path, retention/compaction, observability (metrics, tracing, structured logs)", priority = "p3"),
+        scenario("production hardening: migrations, deployment, second storage backend + second filter engine as plugin proofs", priority = "p4"),
+    ],
 )

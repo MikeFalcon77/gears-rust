@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the authz-resolver gear.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (system, rest),
@@ -13,6 +15,8 @@ AUTHZ_SDK = cargo(
 )
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/authz-resolver/authz-resolver"),
     maturity = "preview",
     name = "AuthZ Resolver",
     description = "Authorization policy evaluation with pluggable decision-point backends.",

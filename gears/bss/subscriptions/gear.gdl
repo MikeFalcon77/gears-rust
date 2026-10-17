@@ -1,14 +1,29 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox description for the bss-subscriptions gear, which has no crate yet.
 #
-# `maturity = "design"`: listed in the catalogue with its documents, and not
-# usable in a product (GBX0321). When the crate exists, describe it beside the
-# crate instead -- `package = cargo(...)`, no `maturity`, no `id` (projected
-# from #[toolkit::gear] then) -- and delete this file.
+# `implementation = "design"`: listed in the catalogue with its documents, and
+# not usable in a product (GBX0321). When the crate exists, describe it beside
+# the crate instead -- `package = cargo(...)` and a `maturity`, no `id`
+# (projected from #[toolkit::gear] then) -- and delete this file.
 
 gear(
-    maturity = "design",
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/bss/subscriptions"),
+    implementation = "design",
     id = "bss-subscriptions",
     name = "Subscriptions",
     description = "Subscription lifecycle state machine with versioned composition and entitlement management.",
     category = "bss",
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("subscription lifecycle state machine (create, activate, suspend, cancel, expire)", priority = "p1"),
+        scenario("versioning and effective-dated plan/add-on composition", priority = "p1"),
+        scenario("multi-tenant ownership (resource, payer, seller tenants)", priority = "p1"),
+        scenario("plan changes (upgrade/downgrade) with proration triggers", priority = "p2"),
+        scenario("renewal semantics, grace periods, and failed-renewal handling", priority = "p2"),
+        scenario("entitlement lifecycle (issue, revoke, point-of-use check)", priority = "p2"),
+        scenario("trial runtime and conversion", priority = "p3"),
+        scenario("event model and billing alignment", priority = "p3"),
+    ],
 )

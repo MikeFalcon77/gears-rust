@@ -1,9 +1,14 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the File Parser.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (rest).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/file-parser/file-parser"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "File Parser",
     description = "Pluggable document parsing and content extraction for indexing and business workflows.",
     category = "core-functionality",
@@ -33,4 +38,12 @@ gear(
     # ONNX Runtime, ~3 MB of model weights, and `libonnxruntime` at run time.
     # Offered to every profile kind, because nothing in the crate ties it to one.
     cargo_features = [feature("magika")],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("parse common document types (DOCX, PPTX, PDF, Markdown, HTML, text) and extract text/metadata", priority = "p1", done = True),
+        scenario("plugin parsers (embedded, Apache Tika, custom)", priority = "p2", done = True),
+        scenario("streaming parsing for large files", priority = "p3"),
+        scenario("entity extraction and enrichment hooks", priority = "p4"),
+        scenario("compliance controls and redaction pipelines", priority = "p5"),
+    ],
 )

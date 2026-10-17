@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the tenant resolver.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (system), colocated_deps
@@ -5,7 +7,10 @@
 # selector defaulting to `constructorfabric`.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/tenant-resolver/tenant-resolver"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "Tenant Resolver",
     description = "Resolves tenant identity and hierarchy through a selected plugin.",
     category = "core-platform-integration",
@@ -40,4 +45,10 @@ gear(
     # in `impl Gear::init`, which is the only machine-readable link between a
     # gear and its config type.
     config_schema = config(exposes = ["vendor"]),
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("resolve related tenant IDs (parent, children) based on given ID", priority = "p1", done = True),
+        scenario("integrated adapter for single-tenant and single-user use-case (desktop app)", priority = "p1", done = True),
+        scenario("tenant resolution cache with invalidation rules", priority = "p2"),
+    ],
 )

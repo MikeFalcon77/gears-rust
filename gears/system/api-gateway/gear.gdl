@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the api-gateway gear.
 #
 # Under ADR cpt-gearbox-adr-macro-projected-catalogue the Rust attributes keep
@@ -12,7 +14,10 @@
 # Declaring any of them here is GBX0210, which names the owning attribute.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/api-gateway"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "API Gateway",
     description = "Single public API entrypoint with routing, auth, rate limiting, and OpenAPI publication.",
     category = "api-ingress",
@@ -42,5 +47,13 @@ gear(
         feature("otel"),
         feature("embed_elements"),
         feature("k8s-auth", kinds = ["kubernetes"]),
+    ],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("route versioned HTTP APIs to gears and expose OpenAPI", priority = "p1", done = True),
+        scenario("enforce request limits, timeouts, and basic middleware", priority = "p1", done = True),
+        scenario("unified authn/z + license checks at gateway", priority = "p2", done = True),
+        scenario("streaming endpoints (SSE) for long-running operations", priority = "p3"),
+        scenario("multi-region routing and traffic shaping policies", priority = "p4"),
     ],
 )

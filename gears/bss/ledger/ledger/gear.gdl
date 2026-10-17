@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the Billing Ledger.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (db, rest, stateful),
@@ -5,7 +7,10 @@
 # lifecycle (entry `serve`, stop timeout 30s).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/bss/ledger/ledger"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "Billing Ledger",
     description = "Append-only double-entry subledger for financially material movements and balances.",
     category = "bss",
@@ -38,4 +43,15 @@ gear(
     # `test-support` exposes a metrics harness for tests and is kept out of the
     # release artifact on purpose; nothing here is a deployment choice.
     cargo_features = [],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("double-entry journal engine with balanced posting", priority = "p1"),
+        scenario("posting rules for invoices, payments, adjustments, and refunds", priority = "p1"),
+        scenario("AR balances, aging, and statement generation", priority = "p2"),
+        scenario("ASC 606-compatible revenue recognition", priority = "p2"),
+        scenario("immutability, audit, and compliance controls", priority = "p2"),
+        scenario("reconciliation and period close", priority = "p3"),
+        scenario("chargebacks and dispute handling", priority = "p3"),
+        scenario("idempotent export to ERP/GL", priority = "p4"),
+    ],
 )

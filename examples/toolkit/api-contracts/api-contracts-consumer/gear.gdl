@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the api-contracts-consumer example gear.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (rest). The contract edges
@@ -13,6 +15,8 @@ PAYMENT_SDK = cargo(
 )
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "examples/toolkit/api-contracts/api-contracts-consumer"),
     maturity = "preview",
     name = "Payments Consumer (example)",
     description = "Resolves PaymentApi from another gear through the client hub.",

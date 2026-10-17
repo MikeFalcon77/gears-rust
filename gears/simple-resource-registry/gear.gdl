@@ -1,14 +1,32 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox description for the simple-resource-registry gear, which has no crate yet.
 #
-# `maturity = "design"`: listed in the catalogue with its documents, and not
-# usable in a product (GBX0321). When the crate exists, describe it beside the
-# crate instead -- `package = cargo(...)`, no `maturity`, no `id` (projected
-# from #[toolkit::gear] then) -- and delete this file.
+# `implementation = "design"`: listed in the catalogue with its documents, and
+# not usable in a product (GBX0321). When the crate exists, describe it beside
+# the crate instead -- `package = cargo(...)` and a `maturity`, no `id`
+# (projected from #[toolkit::gear] then) -- and delete this file.
 
 gear(
-    maturity = "design",
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/simple-resource-registry"),
+    implementation = "design",
     id = "simple-resource-registry",
     name = "Durable Objects",
     description = "Generic typed-resource CRUD storage with GTS validation and pluggable backends.",
     category = "serverless",
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("create, read, update, and soft-delete typed resources with tenant isolation and GTS type-based access control", priority = "p1"),
+        scenario("OData $filter/$orderby and cursor-based pagination on schema fields", priority = "p1"),
+        scenario("GTS type existence validation via Types Registry", priority = "p1"),
+        scenario("pluggable storage backend (Relational Database plugin via SecureORM as default)", priority = "p1"),
+        scenario("configurable soft-delete retention with background purge task", priority = "p1"),
+        scenario("batch CRUD operations (POST /resources:batch, POST /resources:batch-get) per DNA BATCH.md", priority = "p2"),
+        scenario("per-resource-type lifecycle notification events (created/updated/deleted) via Event Broker", priority = "p2"),
+        scenario("per-resource-type audit events via Audit Gear", priority = "p2"),
+        scenario("alternative storage plugins (search engines, vendor-provided backends) with per-type routing", priority = "p3"),
+        scenario("on-change events and serverless functions or workflows invocation", priority = "p4"),
+        scenario("full-text search API with search-capable plugin support", priority = "p4"),
+    ],
 )

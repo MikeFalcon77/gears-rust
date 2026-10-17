@@ -1,10 +1,15 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for File Storage.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (db, rest, stateful),
 # colocated_deps (authz-resolver).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/file-storage/file-storage"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "File Storage",
     description = "Abstract file storage API with pluggable backends for media and generated content.",
     category = "core-functionality",
@@ -46,4 +51,14 @@ gear(
 
     # `default = []` is the only feature and enables nothing.
     cargo_features = [],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("fetch media by URL for LLM input", priority = "p1"),
+        scenario("store generated content (images, audio, video)", priority = "p1"),
+        scenario("get file metadata", priority = "p1"),
+        scenario("tenant quotas and usage reporting integration", priority = "p2"),
+        scenario("pluggable backends (filesystem, object storage)", priority = "p2"),
+        scenario("encryption, retention, and lifecycle policies", priority = "p3"),
+        scenario("compliance exports and legal hold support", priority = "p4"),
+    ],
 )

@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the ECB Rate Source Plugin.
 #
 # Projected from #[toolkit::gear]: id, colocated_deps (types-registry).
@@ -7,6 +9,8 @@
 # `sdk` -- the rate-provider SDK and its GTS types are bss-rate-provider's.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/bss/rate-provider/plugins/ecb-plugin"),
     maturity = "preview",
     name = "ECB Rate Source Plugin",
     description = "ECB daily reference rate source plugin for the FX Rate Provider gear.",

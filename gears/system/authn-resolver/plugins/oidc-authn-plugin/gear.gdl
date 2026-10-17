@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the OIDC AuthN plugin.
 #
 # Fills the same extension point as static-authn-plugin, so the two are
@@ -10,6 +12,8 @@
 # vendor-match check keys on.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/authn-resolver/plugins/oidc-authn-plugin"),
     maturity = "preview",
     name = "OIDC AuthN Plugin",
     description = "Validates bearer tokens against an OIDC issuer.",

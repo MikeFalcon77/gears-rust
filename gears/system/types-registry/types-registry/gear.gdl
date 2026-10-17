@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the types-registry gear.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (system, db, rest,
@@ -5,7 +7,10 @@
 # readiness).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/types-registry/types-registry"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "Types Registry",
     # Pulled in by roughly 22 gears via deps, so it is linked into most
     # applications.
@@ -23,4 +28,12 @@ gear(
     # `integration`, which wants a Docker daemon. "Nothing here for you" is the
     # true answer, and it is not the same as saying nothing.
     cargo_features = [],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("get schema by ID (for LLM Gateway tool resolution)", priority = "p1", done = True),
+        scenario("batch get schemas", priority = "p1", done = True),
+        scenario("validate, register and resolve types and instances by versioned identifiers", priority = "p2", done = True),
+        scenario("distribute GTS instances and schemas updates across gears safely via events generation", priority = "p2"),
+        scenario("schemas and instances import/export in different formats (YAML, RAML)", priority = "p3"),
+    ],
 )

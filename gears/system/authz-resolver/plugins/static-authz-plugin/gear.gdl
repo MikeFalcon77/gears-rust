@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the Static AuthZ Plugin.
 #
 # Fills authz-resolver's extension point (`AuthZResolverPluginClient`) with a
@@ -6,6 +8,8 @@
 #
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/authz-resolver/plugins/static-authz-plugin"),
     maturity = "preview",
     name = "Static AuthZ Plugin",
     description = "Static tenant-scoped authorization policy for development and testing.",

@@ -1,9 +1,13 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the authn-resolver gear.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (system), colocated_deps
 # (types-registry).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/authn-resolver/authn-resolver"),
     maturity = "preview",
     name = "Authentication Resolver",
     # Authentication only: authorization is authz-resolver, a gear of its own.

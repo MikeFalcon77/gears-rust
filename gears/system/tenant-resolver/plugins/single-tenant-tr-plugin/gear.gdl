@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for Single-Tenant Resolver Plugin.
 #
 # One of three alternatives filling tenant-resolver's extension point. The
@@ -5,6 +7,8 @@
 # from source.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/tenant-resolver/plugins/single-tenant-tr-plugin"),
     maturity = "preview",
     name = "Single-Tenant Resolver Plugin",
     description = "Resolves every request to one fixed tenant.",

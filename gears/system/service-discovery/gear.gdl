@@ -1,3 +1,5 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for the service-discovery gear.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (grpc, system, rest),
@@ -5,6 +7,8 @@
 # slice declaring a client trait -- and `one_per_installation`.
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/service-discovery"),
     maturity = "preview",
     name = "Service Discovery",
     description = "Service discovery and gear directory for the runtime: instance registration, tracking, and resolution.",

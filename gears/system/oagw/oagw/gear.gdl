@@ -1,10 +1,15 @@
+# Every GDL field: https://github.com/constructorfabric/gearbox/blob/main/docs/gdl.md
+#
 # Gearbox product metadata for OAGW, the Outbound API Interface.
 #
 # Projected from #[toolkit::gear]: id, runtime_caps (system, rest),
 # colocated_deps (types-registry, authz-resolver, credstore, tenant-resolver).
 
 gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/oagw/oagw"),
     maturity = "preview",
+    implementation = "in-progress",
     name = "Outbound API Interface",
     description = "Abstraction layer for outbound API calls with credential injection and observability.",
     category = "core-platform-integration",
@@ -40,4 +45,12 @@ gear(
     # `fips` restricts TLS to FIPS-approved suites, a real deployment choice.
     # `test-utils` is test scaffolding and is not offered.
     cargo_features = [feature("fips")],
+    # From docs/GEARS.md.
+    scenarios = [
+        scenario("define outbound endpoints and execute calls with tracing", priority = "p1", done = True),
+        scenario("adapter for single-user and single-tenant use-cases (desktop app)", priority = "p2"),
+        scenario("outbound calls metrics collection", priority = "p2"),
+        scenario("minimalistic rate limiting", priority = "p3"),
+        scenario("audit with retention for outbound calls", priority = "p4"),
+    ],
 )
