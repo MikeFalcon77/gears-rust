@@ -1,0 +1,57 @@
+name: GDL Validation
+
+# Every gear.gdl evaluates, and the catalogue it builds has no errors:
+# unknown fields, a `maturity` Gearbox does not know, a `docs(...)` or `tests`
+# path that points nowhere, a `source = git(...)` that disagrees with the
+# checkout. Gearbox reads the descriptions and the Rust attributes; it builds
+# nothing.
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**/gear.gdl'
+      - '**/Cargo.toml'
+      - 'gears/**/*.rs'
+      - '.github/workflows/gdl-validation.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: gdl-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  # The Gearbox that reads GDL 1.0. Move it forward with the descriptions.
+  GEARBOX_REF: main
+
+jobs:
+  gdl_validate:
+    name: Validate gear.gdl
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain from rust-toolchain.toml
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup show
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: true
+          cache-targets: false
+          shared-key: gearbox-${{ env.GEARBOX_REF }}
+
+      - name: Install Gearbox
+        run: >
+          cargo install --locked --git https://github.com/constructorfabric/gearbox
+          --branch "$GEARBOX_REF" gearbox-cli
+
+      - name: Validate descriptions
+        run: gearbox validate --root . --source-id gears-rust
