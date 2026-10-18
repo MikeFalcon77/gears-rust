@@ -90,7 +90,7 @@ impl ScopeEnforcementRules {
     ///
     /// Returns `true` if the path/method matches at least one scope enforcement rule.
     fn matches_protected_route(&self, path: &str, method: &str) -> bool {
-        if !self.enabled {
+        if !self.enabled || is_health_probe(path, method) {
             return false;
         }
 
@@ -119,7 +119,7 @@ impl ScopeEnforcementRules {
         method: &str,
         token_scopes: &[String],
     ) -> Result<(), CanonicalError> {
-        if !self.enabled {
+        if !self.enabled || is_health_probe(path, method) {
             return Ok(());
         }
 
@@ -174,6 +174,14 @@ impl ScopeEnforcementRules {
         // No rule matched — allow (unprotected route)
         Ok(())
     }
+}
+
+// HealthProbeConfig documents these endpoints as public in every listener
+// mode. Kubernetes cannot present OAuth capability scopes to its probes. Keep
+// the exemption exact and GET-only; similarly named application routes remain
+// subject to the configured catch-all rule.
+fn is_health_probe(path: &str, method: &str) -> bool {
+    method.eq_ignore_ascii_case("GET") && matches!(path, "/healthz" | "/readyz" | "/health")
 }
 
 /// Scope enforcement middleware state.
@@ -274,6 +282,66 @@ mod tests {
             .collect();
 
         RoutePoliciesConfig { enabled, rules }
+    }
+
+    #[tokio::test]
+    async fn catch_all_keeps_only_exact_get_probes_public() {
+        use axum::{
+            Router,
+            body::Body,
+            http::{Request, StatusCode},
+            middleware::from_fn_with_state,
+            routing::get,
+        };
+        use tower::ServiceExt;
+        let rules =
+            ScopeEnforcementRules::from_config(&build_config(true, vec![("/**", vec!["admin"])]))
+                .unwrap();
+        let router = Router::new()
+            .route(
+                "/healthz",
+                get(|| async { "ok" }).post(|| async { "private" }),
+            )
+            .route("/readyz", get(|| async { "ok" }))
+            .route("/health", get(|| async { "ok" }))
+            .route("/private/healthz", get(|| async { "private" }))
+            .layer(from_fn_with_state(
+                ScopeEnforcementState { rules },
+                scope_enforcement_middleware,
+            ));
+        for with_context in [false, true] {
+            for (method, path, allowed) in [
+                ("GET", "/healthz", true),
+                ("GET", "/readyz", true),
+                ("GET", "/health", true),
+                ("GET", "/private/healthz", false),
+                ("POST", "/healthz", false),
+            ] {
+                let mut request = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .unwrap();
+                if with_context {
+                    request
+                        .extensions_mut()
+                        .insert(SecurityContext::anonymous());
+                }
+                let response = router.clone().oneshot(request).await.unwrap();
+                let expected = if allowed {
+                    StatusCode::OK
+                } else if with_context {
+                    StatusCode::FORBIDDEN
+                } else {
+                    StatusCode::UNAUTHORIZED
+                };
+                assert_eq!(
+                    response.status(),
+                    expected,
+                    "{method} {path}; context={with_context}"
+                );
+            }
+        }
     }
 
     #[test]

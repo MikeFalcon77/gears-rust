@@ -1,0 +1,24 @@
+[package]
+name = "cf-gears-family-labs-bootstrap"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+[lib]
+name = "family_labs_bootstrap"
+[lints]
+workspace = true
+[dependencies]
+toolkit = { workspace = true }
+settings-service = { workspace = true }
+settings-service-sdk = { workspace = true }
+authn-resolver = { workspace = true }
+authn-resolver-sdk = { package = "cf-gears-authn-resolver-sdk", path = "../../system/authn-resolver/authn-resolver-sdk" }
+demo-catalogue = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+inventory = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+tokio-util = { workspace = true }

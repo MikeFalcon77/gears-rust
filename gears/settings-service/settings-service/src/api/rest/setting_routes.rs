@@ -37,6 +37,7 @@ pub fn register_routes(
 ) -> Router {
     let router = OperationBuilder::get("/settings-service/v1/settings")
         .operation_id("settings_service.browse_settings")
+        .exposed()
         .summary("Browse effective values")
         .description(
             "Resolve a page of settings at one scope. `tenant` is resolution context, \
@@ -79,6 +80,7 @@ pub fn register_routes(
 
     let router = OperationBuilder::get("/settings-service/v1/settings/{key}")
         .operation_id("settings_service.get_setting")
+        .exposed()
         .summary("Read an effective value")
         .description(
             "Resolve one setting at a scope: the value masked by classification, its \
@@ -120,6 +122,7 @@ pub fn register_routes(
 
     let router = OperationBuilder::get("/settings-service/v1/settings/{key}/history")
         .operation_id("settings_service.get_setting_history")
+        .exposed()
         .summary("Read a setting's history at a scope")
         .description(
             "The mutation history of one setting at one scope, newest first and \

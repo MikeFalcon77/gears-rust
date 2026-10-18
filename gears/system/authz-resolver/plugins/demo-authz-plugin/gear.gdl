@@ -1,0 +1,10 @@
+gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/authz-resolver/plugins/demo-authz-plugin"),
+    maturity = "preview", name = "Community Demo Action Policy",
+    description = "Explicit scoped action grants and tenant hierarchy enforcement for the community demo.",
+    category = "core-platform-integration", visibility = "internal",
+    package = cargo(crate_name = "cf-gears-demo-authz-plugin", lib = "demo_authz_plugin", path = "."),
+    implements = "cf.core.authz_resolver.plugin.v1~",
+    config_schema = config(exposes = ["vendor", "priority", "allowed_tenants", "grants"]),
+)

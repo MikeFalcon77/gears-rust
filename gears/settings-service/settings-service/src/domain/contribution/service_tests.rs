@@ -624,8 +624,8 @@ async fn retire_then_re_register_revives_the_same_row() {
             .contains(&key("network", "proxy_enabled", 1).to_string()),
         "the revival is announced as an event"
     );
-    // Type registration happened once: the retirement left the type in place.
-    assert_eq!(h.registrar.registered.lock().expect("lock").len(), 1);
+    // Reconciliation restores the type even when V1 restarted since retirement.
+    assert_eq!(h.registrar.registered.lock().expect("lock").len(), 2);
 }
 
 #[tokio::test]
@@ -1493,4 +1493,28 @@ async fn a_module_declares_settings_of_a_value_type_it_registered_itself() {
         "the module type's secret trait is honoured"
     );
     assert_eq!(token.data_classification, "secret");
+}
+
+#[tokio::test]
+async fn a_restart_restores_the_type_without_changing_the_durable_declaration() {
+    let first = Harness::new().await;
+    first.register(vec![flag("network", "proxy_enabled")]).await;
+    let before = first.stored(&key("network", "proxy_enabled", 1)).await;
+    // Same durable database, fresh process-local registry and publisher.
+    let restarted = Harness::with_catalogue(Arc::clone(&first.db), catalogue());
+    let result = restarted
+        .register(vec![flag("network", "proxy_enabled")])
+        .await;
+    assert!(result.errors.is_empty());
+    assert_eq!(result.registered + result.updated + result.reactivated, 0);
+    assert_eq!(
+        restarted.stored(&key("network", "proxy_enabled", 1)).await,
+        before
+    );
+    assert_eq!(
+        restarted.registrar.registered.lock().expect("lock").len(),
+        1
+    );
+    assert!(restarted.registered_events().is_empty());
+    assert!(restarted.audit.records().is_empty());
 }

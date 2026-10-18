@@ -1,0 +1,19 @@
+[package]
+name = "cf-gears-demo-catalogue"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+[lib]
+name = "demo_catalogue"
+[lints]
+workspace = true
+[dependencies]
+toolkit = { workspace = true }
+types-registry = { workspace = true }
+types-registry-sdk = { package = "cf-gears-types-registry-sdk", path = "../../system/types-registry/types-registry-sdk" }
+event-broker-sdk = { package = "cf-gears-event-broker-sdk", path = "../../system/event-broker/event-broker-sdk" }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+inventory = { workspace = true }
+serde_json = { workspace = true }

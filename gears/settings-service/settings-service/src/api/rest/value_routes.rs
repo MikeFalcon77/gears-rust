@@ -59,6 +59,7 @@ pub fn register_routes(
 ) -> Router {
     let router = OperationBuilder::put("/settings-service/v1/settings/{key}/value")
         .operation_id("settings_service.set_value")
+        .exposed()
         .summary("Set a setting's value at a scope")
         .description(
             "Store a value at the target scope, effective on the next read. Authorization is \
@@ -109,6 +110,7 @@ pub fn register_routes(
 
     let router = OperationBuilder::post("/settings-service/v1/settings/{key}/value/revert")
         .operation_id("settings_service.revert_value")
+        .exposed()
         .summary("Revert a setting's value at a scope")
         .description(
             "Clear the override at the target scope so it falls back - to the nearest ancestor \

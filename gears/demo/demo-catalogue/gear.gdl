@@ -1,0 +1,8 @@
+gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/demo/demo-catalogue"),
+    maturity = "preview", name = "Family Labs Startup Catalogue",
+    description = "Restores demo event declarations through the local Types Registry SDK at every process start.",
+    category = "core-platform-integration", visibility = "internal",
+    package = cargo(crate_name = "cf-gears-demo-catalogue", lib = "demo_catalogue", path = "."),
+)

@@ -37,7 +37,7 @@ gear(
 
     # Includes structured discovery and platform-auth settings so prepared
     # products can declare them without losing them during generation.
-    config_schema = config(exposes = ["bind_addr", "enable_docs", "cors_enabled", "prefix_path", "auth_disabled", "advertise_uri", "gateway_proxy", "internal_auth"]),
+    config_schema = config(exposes = ["bind_addr", "enable_docs", "cors_enabled", "prefix_path", "auth_disabled", "advertise_uri", "gateway_proxy", "internal_auth", "route_policies"]),
 
     # Every one of these is a product decision. `k8s-auth` is the exception that
     # needs a kind: it authenticates against a Kubernetes service account.

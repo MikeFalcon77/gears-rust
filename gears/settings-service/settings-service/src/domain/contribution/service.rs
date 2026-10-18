@@ -600,6 +600,12 @@ where
                 format!("`{key}` is owned by another module"),
             ));
         }
+        // V1 registry is process-local. The durable declaration can survive a
+        // restart while its derived type does not. Restore the same schema even
+        // when reconciliation leaves the database and tenant overrides unchanged.
+        self.registrar
+            .register_setting_type(key, &contributed.value_type_id)
+            .await?;
         let metadata = derived.metadata(contributed);
         let changed = metadata_differs(&existing, &metadata);
         let classification_changed = existing.data_classification != metadata.data_classification;

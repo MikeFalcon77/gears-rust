@@ -1,0 +1,11 @@
+gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/authn-resolver/plugins/firebase-authn-plugin"),
+    maturity = "preview",
+    name = "Firebase Authentication",
+    description = "Verifies Firebase ID tokens and maps configured UIDs to tenant identities.",
+    category = "core-platform-integration", visibility = "internal",
+    package = cargo(crate_name = "cf-gears-firebase-authn-plugin", lib = "firebase_authn_plugin", path = "."),
+    implements = "cf.core.authn_resolver.plugin.v1~",
+    config_schema = config(exposes = ["vendor", "priority", "project_id", "subject_namespace", "identities"]),
+)
