@@ -38,6 +38,7 @@ export interface FeedOptions {
   topic: string;
   eventType: string;
   retryMs?: number;
+  requiresProcessor?: boolean;
 }
 class Rejoin extends Error {}
 class CheckpointUnavailable extends Error {}
@@ -76,7 +77,23 @@ export class EventFeed {
   private stopped = false;
   private checkpoint: Checkpoints;
   private active: { sub?: string; group: string } | undefined;
-  private pagehide = () => this.stop();
+  private paused = false;
+  private pagehide = (event: PageTransitionEvent) => {
+    if (!event.persisted) {
+      this.stop();
+      return;
+    }
+    this.paused = true;
+    this.controller?.abort();
+    void this.cleanup(this.active);
+    this.update({ status: "reconnecting" });
+  };
+  private pageshow = (event: PageTransitionEvent) => {
+    if (event.persisted && !this.stopped) {
+      this.paused = false;
+      this.start();
+    }
+  };
   constructor(private options: FeedOptions) {
     this.checkpoint = new Checkpoints(
       options.identity,
@@ -85,8 +102,10 @@ export class EventFeed {
       options.storage,
     );
     options.signal.addEventListener("abort", () => this.stop(), { once: true });
-    if (typeof window !== "undefined")
-      window.addEventListener("pagehide", this.pagehide, { once: true });
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", this.pagehide);
+      window.addEventListener("pageshow", this.pageshow);
+    }
   }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => {
@@ -130,8 +149,10 @@ export class EventFeed {
     this.controller?.abort();
     this.cleanup(this.active);
     this.update({ status: "stopped" });
-    if (typeof window !== "undefined")
+    if (typeof window !== "undefined") {
       window.removeEventListener("pagehide", this.pagehide);
+      window.removeEventListener("pageshow", this.pageshow);
+    }
   }
   private async cleanup(active: typeof this.active) {
     if (!active) return;
@@ -146,6 +167,8 @@ export class EventFeed {
   private start() {
     if (
       this.stopped ||
+      this.paused ||
+      (this.options.requiresProcessor && !this.handlers.size) ||
       this.controller ||
       this.options.signal.aborted ||
       ["error", "checkpoint_unavailable"].includes(this.snapshot.status)
@@ -270,7 +293,6 @@ export class EventFeed {
         )
           throw Error("The broker did not return an event stream");
         this.update({ status: "connected", error: null });
-        attempts = 0;
         const reader = response.body.getReader(),
           decoder = new SseDecoder();
         try {
@@ -287,7 +309,9 @@ export class EventFeed {
             ]).finally(() => clearTimeout(timer));
             const { value, done } = next;
             if (done) break;
-            for (const frame of decoder.push(value)) await this.process(frame);
+            for (const frame of decoder.push(value)) {
+              if(await this.process(frame)) attempts=0;
+            }
           }
         } finally {
           await reader.cancel().catch(() => {});
@@ -372,15 +396,26 @@ export class EventFeed {
           );
           return;
         }
-        for (const handler of this.handlers) await handler(event);
+        try {
+          for (const handler of this.handlers) await handler(event);
+        } catch (cause) {
+          // A processor's 401/403 is not an EB login failure. Preserve the
+          // checkpoint and retry processing after rejoining the stream.
+          throw new Rejoin(
+            "Event processing failed: " +
+              (cause instanceof Error
+                ? cause.message
+                : "retrying the effective read"),
+          );
+        }
         if (this.options.signal.aborted) return;
         this.checkpoint.event(event);
         this.update({ events: [event, ...this.snapshot.events].slice(0, 100) });
-        return;
+        return true;
       }
       case "heartbeat":
         this.update({ lastHeartbeat: frame.at });
-        return;
+        return true;
       case "topology":
         this.positions(frame.assigned);
         return;

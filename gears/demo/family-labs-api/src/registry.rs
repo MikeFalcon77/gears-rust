@@ -4,8 +4,10 @@ use axum::{Extension, Json, Router, extract::Path, http::HeaderMap};
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 use toolkit::api::{OpenApiRegistry, canonical_prelude::*, operation_builder::OperationBuilder};
+use toolkit::client_hub::ClientHub;
 use toolkit_http::{HttpClient, RedirectConfig, TransportSecurity};
 use toolkit_security::SecurityContext;
+use types_registry_sdk::{InstanceQuery, TypeSchemaQuery, TypesRegistryClient};
 
 #[toolkit_canonical_errors::resource_error("gts.cf.core.types_registry.entity.v1~")]
 struct RegistryError;
@@ -34,10 +36,7 @@ struct RegistryResponse {
 }
 fn target(source: &str) -> Option<&'static str> {
     match source {
-        "gateway" => Some("http://127.0.0.1:8087/types-registry/v1/entities"),
-        "settings" => Some(
-            "http://demo-settings-worker.gearbox-demo.svc.cluster.local:8090/types-registry/v1/entities",
-        ),
+        "settings" => Some("http://demo-settings-worker:8090/types-registry/v1/entities"),
         _ => None,
     }
 }
@@ -47,10 +46,33 @@ fn visible(entity: &Value, tenant: &str) -> bool {
 async fn read(
     Extension(ctx): Extension<SecurityContext>,
     Extension(reader): Extension<Arc<Reader>>,
+    Extension(hub): Extension<Arc<ClientHub>>,
     Path(source): Path<String>,
     headers: HeaderMap,
 ) -> ApiResult<Json<RegistryResponse>> {
     use toolkit_canonical_errors::CanonicalError;
+    if source == "gateway" {
+        let registry = hub.get::<dyn TypesRegistryClient>().map_err(|_| {
+            CanonicalError::service_unavailable()
+                .with_detail("Gateway registry unavailable")
+                .create()
+        })?;
+        let mut entities = Vec::new();
+        for schema in registry
+            .list_type_schemas(TypeSchemaQuery::default())
+            .await?
+        {
+            entities.push(serde_json::json!({"id":schema.type_uuid,"gts_id":schema.type_id.to_string(),"is_schema":true,"content":schema.raw_schema,"description":schema.description}));
+        }
+        for instance in registry.list_instances(InstanceQuery::default()).await? {
+            let value = serde_json::json!({"id":instance.uuid,"gts_id":instance.id.to_string(),"is_schema":false,"content":instance.object,"description":instance.description});
+            if visible(&value, &ctx.subject_tenant_id().to_string()) {
+                entities.push(value);
+            }
+        }
+        let count = entities.len();
+        return Ok(Json(RegistryResponse { entities, count }));
+    }
     let url = target(&source).ok_or_else(|| {
         RegistryError::not_found("Unknown registry source")
             .with_resource(source.clone())
@@ -126,7 +148,7 @@ mod tests {
     use serde_json::json;
     #[test]
     fn source_is_a_closed_allowlist() {
-        assert!(target("gateway").is_some());
+        assert!(target("gateway").is_none()); // Gateway uses its in-process SDK, never the raw HTTP route.
         assert!(target("settings").is_some());
         for value in [
             "http://evil.example",

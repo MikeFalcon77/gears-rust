@@ -173,6 +173,7 @@ function ConfiguredShell({
                 storage: sessionStorage,
                 topic: config.events.topic,
                 eventType: config.events.type,
+                requiresProcessor: config.events.requiresProcessor,
               }),
               api,
               identity,

@@ -7,7 +7,11 @@ export const effective = <T>(
   runtime.api.post<EffectiveValue<T>>(
     runtime.config.settings.effectivePath,
     { key, scope: scopeFor(runtime.identity) },
-    signal,
+    AbortSignal.any([
+      runtime.signal,
+      AbortSignal.timeout(15000),
+      ...(signal ? [signal] : []),
+    ]),
   );
 export function parseValue(kind: string, input: string): unknown {
   if (kind === "boolean") {

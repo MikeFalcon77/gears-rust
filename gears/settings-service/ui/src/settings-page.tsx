@@ -197,10 +197,9 @@ export default function SettingsPage({ runtime }: { runtime: GearRuntime }) {
             setBusy(true);
             setError("");
             void runtime.api
-              .json(
-                "/oagw/v1/proxy/demo-echo.gearbox-demo.svc.cluster.local:8080/echo",
-                { headers: { "X-Request-Id": crypto.randomUUID() } },
-              )
+              .json(runtime.config.settings.echoPath, {
+                headers: { "X-Request-Id": crypto.randomUUID() },
+              })
               .then(setEcho)
               .catch((cause) => setError(cause.message))
               .finally(() => setBusy(false));

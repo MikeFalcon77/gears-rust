@@ -23,9 +23,10 @@ export interface RuntimeConfig {
       portraitZoom?: number;
     }
   >;
-  events: { topic: string; type: string };
+  events: { topic: string; type: string; requiresProcessor?: boolean };
   settings: {
     effectivePath: string;
+    echoPath: string;
     approvalKey: string;
     fields: Array<{
       key: string;
