@@ -134,6 +134,7 @@ members = [
     "gears/settings-service/settings-service-sdk",
     "gears/demo/demo-catalogue",
     "gears/demo/family-labs-bootstrap",
+    "gears/demo/family-labs-api",
     "gears/settings-service/settings-service",
     "gears/system/tenant-resolver/tenant-resolver-sdk",
     "gears/system/tenant-resolver/tenant-resolver",
@@ -445,6 +446,7 @@ aws-lc-rs = "1.17"
 
 # settings-service
 demo-catalogue = { package = "cf-gears-demo-catalogue", version = "0.1.0", path = "gears/demo/demo-catalogue" }
+family-labs-api = { package = "cf-gears-family-labs-api", version = "0.1.0", path = "gears/demo/family-labs-api" }
 family-labs-bootstrap = { package = "cf-gears-family-labs-bootstrap", version = "0.1.0", path = "gears/demo/family-labs-bootstrap" }
 settings-service-sdk = { package = "cf-gears-settings-service-sdk", version = "0.1.0", path = "gears/settings-service/settings-service-sdk" }
 settings-service = { package = "cf-gears-settings-service", version = "0.1.3", path = "gears/settings-service/settings-service" }

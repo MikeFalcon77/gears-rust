@@ -432,3 +432,19 @@ impl<'de> Deserialize<'de> for SettingKey {
 #[cfg(test)]
 #[path = "key_tests.rs"]
 mod key_tests;
+
+// The wire representation is one validated string, never the parser's fields.
+impl schemars::JsonSchema for SettingKey {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SettingKey".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <String as schemars::JsonSchema>::json_schema(generator)
+    }
+}
+impl utoipa::PartialSchema for SettingKey {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        <String as utoipa::PartialSchema>::schema()
+    }
+}
+impl utoipa::ToSchema for SettingKey {}

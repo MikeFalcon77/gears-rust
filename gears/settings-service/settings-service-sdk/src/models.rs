@@ -20,7 +20,18 @@ use crate::SettingKey;
 /// it* therefore reads the source, never the value: a setting whose type admits
 /// `null` may legitimately be set to `null`, which is indistinguishable by
 /// inspection from a `null` default.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+    utoipa::ToSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum EffectiveSource {
     /// An override exists at the requested scope.
@@ -79,7 +90,9 @@ impl std::fmt::Debug for SecretHandle {
 }
 
 /// A request for one setting's effective value at a scope.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, utoipa::ToSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct GetEffectiveRequest {
     /// The setting to resolve.
@@ -94,7 +107,9 @@ pub struct GetEffectiveRequest {
 /// the requested scope — never a sibling or a descendant. It carries no setter
 /// identity and no timestamp: an ancestor's administrator is not exposed to a
 /// subordinate tenant through the consumer path.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, utoipa::ToSchema,
+)]
 #[serde(rename_all = "camelCase")]
 pub struct TrailEntry {
     /// The scope inspected: `/` or `/tenants/{id}`.
@@ -110,7 +125,7 @@ fn empty_object() -> serde_json::Value {
 }
 
 /// A resolved effective value with the trace of where it came from.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveValueResponse {
     /// The setting that was resolved.
@@ -274,3 +289,8 @@ pub struct ReconcileResult {
 #[cfg(test)]
 #[path = "models_tests.rs"]
 mod models_tests;
+
+// Preserve the existing camelCase SDK wire format. api_dto currently forces
+// snake_case, so these established DTOs use the same marker seam as AuthZ.
+impl toolkit::api::api_dto::RequestApiDto for GetEffectiveRequest {}
+impl toolkit::api::api_dto::ResponseApiDto for EffectiveValueResponse {}

@@ -2713,6 +2713,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "cf-gears-family-labs-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "cf-gears-oagw",
+ "cf-gears-settings-service-sdk",
+ "cf-gears-toolkit",
+ "cf-gears-toolkit-canonical-errors",
+ "cf-gears-toolkit-security",
+ "cf-gears-types-registry",
+ "cf-gears-types-registry-sdk",
+ "inventory",
+ "serde_json",
+]
+
+[[package]]
 name = "cf-gears-family-labs-bootstrap"
 version = "0.1.0"
 dependencies = [
@@ -3620,11 +3638,13 @@ dependencies = [
  "cf-gears-authz-resolver-sdk",
  "cf-gears-credstore",
  "cf-gears-credstore-sdk",
+ "cf-gears-event-broker-sdk",
  "cf-gears-settings-service-sdk",
  "cf-gears-tenant-resolver-sdk",
  "cf-gears-test-containers",
  "cf-gears-toolkit",
  "cf-gears-toolkit-canonical-errors",
+ "cf-gears-toolkit-contract",
  "cf-gears-toolkit-db",
  "cf-gears-toolkit-db-macros",
  "cf-gears-toolkit-macros",
@@ -3659,18 +3679,24 @@ name = "cf-gears-settings-service-sdk"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "cf-gears-toolkit",
  "cf-gears-toolkit-canonical-errors",
+ "cf-gears-toolkit-contract",
  "cf-gears-toolkit-gts",
+ "cf-gears-toolkit-http",
  "cf-gears-toolkit-odata",
  "cf-gears-toolkit-odata-macros",
  "cf-gears-toolkit-security",
  "gts-id",
  "jsonschema",
+ "schemars 1.2.1",
  "secrecy",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "utoipa",
  "uuid",
 ]
 

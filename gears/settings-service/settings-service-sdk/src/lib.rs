@@ -53,3 +53,10 @@ pub use models::{EffectiveSource, SecretHandle, TrailEntry};
 // The wrapper `resolve_secret` returns, re-exported so a consumer reads the
 // plaintext with the same `secrecy` this crate compiled against.
 pub use secrecy::{ExposeSecret, SecretString};
+
+pub mod remote;
+pub mod rest;
+pub use remote::{SettingsReadApi, settings_read_api_ir};
+pub use rest::{SettingsReadApiRest, settings_read_api_rest_http_binding};
+#[cfg(feature = "rest-client")]
+pub use rest::{SettingsReadApiRestClient, SettingsReadApiRestResolvingClient};

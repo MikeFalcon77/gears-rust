@@ -1,0 +1,11 @@
+SETTINGS_READ_SDK = cargo(crate_name = "cf-gears-settings-service-sdk", lib = "cf_gears_settings_service_sdk", path = "../../settings-service/settings-service-sdk", features = ["rest-client"])
+gear(
+    gdl_version = "1.0",
+    source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/demo/family-labs-api"),
+    maturity = "preview", name = "Family Labs API",
+    description = "Gateway adapter consuming SettingsReadApi v1 across the worker boundary.",
+    category = "core-platform-integration", visibility = "public",
+    package = cargo(crate_name = "cf-gears-family-labs-api", lib = "family_labs_api", path = "."),
+    consumes = [consume(contract = "SettingsReadApi", rust = "settings_service_sdk::SettingsReadApi", sdk = SETTINGS_READ_SDK)],
+    serves = [endpoint(name = "rest", via = "rest_host")],
+)

@@ -33,7 +33,7 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
+        let mut migrations: Vec<Box<dyn MigrationTrait>> = vec![
             Box::new(m20260812_000001_initial::Migration),
             Box::new(m20260813_000001_categories::Migration),
             Box::new(m20260825_000001_setting_declarations::Migration),
@@ -47,7 +47,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260925_000001_audit_records_default_horizon_index::Migration),
             Box::new(m20260925_000002_audit_retention_policy::Migration),
             Box::new(m20260925_000003_audit_retention_policy_seed::Migration),
-        ]
+        ];
+        migrations.extend(crate::infra::change_outbox::migrations());
+        migrations
     }
 }
 

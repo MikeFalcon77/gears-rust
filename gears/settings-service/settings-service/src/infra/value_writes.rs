@@ -7,7 +7,7 @@
 //! request-level operations — a batch, a clone, the read-only report — out of
 //! the writer's steps.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 use settings_service_sdk::SettingKey;
@@ -143,6 +143,10 @@ pub struct WriteCoordinator {
     writer: Arc<ConcreteWriter>,
     pending: PendingSecretRepo,
     declarations: DeclarationRepo,
+    events: Option<(
+        Vec<Uuid>,
+        OnceLock<event_broker_sdk::producer::ProducerOutbox>,
+    )>,
 }
 
 fn conn_error(err: &DbError) -> DomainError {
@@ -160,7 +164,31 @@ impl WriteCoordinator {
             writer,
             pending: PendingSecretRepo,
             declarations: DeclarationRepo,
+            events: None,
         }
+    }
+
+    /// Require a durable event enqueue for configured demo tenants.
+    #[must_use]
+    pub fn with_event_tenants(mut self, tenants: Vec<Uuid>) -> Self {
+        self.events = Some((tenants, OnceLock::new()));
+        self
+    }
+
+    /// Install the lifecycle-owned producer before this instance is ready.
+    ///
+    /// # Errors
+    /// Fails when event integration is absent or was already installed.
+    pub fn install_event_outbox(
+        &self,
+        outbox: event_broker_sdk::producer::ProducerOutbox,
+    ) -> anyhow::Result<()> {
+        let (_, slot) = self
+            .events
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("event integration is not configured"))?;
+        slot.set(outbox)
+            .map_err(|_| anyhow::anyhow!("event outbox already started"))
     }
 
     /// The writer, for the challenge parameters and the resolver.
@@ -233,6 +261,16 @@ impl WriteCoordinator {
     ) -> Result<Committed, DomainError> {
         let key = gated.declaration.key.clone();
         let tenant_id = gated.tenant_id;
+        let event_outbox = match &self.events {
+            Some((tenants, slot)) if tenants.contains(&tenant_id) => Some(
+                slot.get()
+                    .cloned()
+                    .ok_or_else(|| DomainError::Unavailable {
+                        detail: "Settings event outbox is starting".into(),
+                    })?,
+            ),
+            _ => None,
+        };
         // Validation and the store leg come first, outside the transaction: the
         // Credential Store cannot join it, and toolkit-db refuses a fresh
         // connection while one is open on this task. The connection here is
@@ -267,9 +305,9 @@ impl WriteCoordinator {
         let outcome = self
             .db
             .db()
-            .transaction_ref_mapped::<_, Committed, DomainError>(move |tx| {
+            .transaction_ref_mapped::<_, (Committed, Option<toolkit_db::outbox::Wake>), DomainError>(move |tx| {
                 Box::pin(async move {
-                    writer
+                    let committed = writer
                         .commit_in(
                             tx,
                             &gated_owned,
@@ -278,12 +316,22 @@ impl WriteCoordinator {
                             &actor_owned,
                             change_set_id,
                         )
-                        .await
+                        .await?;
+                    let wake = if let Some(outbox) = event_outbox {
+                        Some(outbox.enqueue(tx, super::change_outbox::SettingsChanged {
+                            key: committed.key.clone(), tenant_id: committed.tenant_id,
+                            change_set_id: committed.change_set_id, request_id: actor_owned.request_id.clone(),
+                        }).await.map_err(|err| DomainError::Internal { diagnostic: format!("transactional event enqueue failed: {err}") })?)
+                    } else { None };
+                    Ok((committed, wake))
                 })
             })
             .await;
         match outcome {
-            Ok(committed) => {
+            Ok((committed, wake)) => {
+                if let Some(wake) = wake {
+                    wake.fire();
+                }
                 self.writer.after_commit(&committed, actor).await;
                 Ok(committed)
             }

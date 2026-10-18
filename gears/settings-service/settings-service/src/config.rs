@@ -85,6 +85,9 @@ pub struct SettingsServiceConfig {
     /// a silent hole.
     #[serde(default)]
     pub client_wiring: std::collections::BTreeMap<String, WiringEntry>,
+    /// Optional transactional integration for the prepared community demo.
+    #[serde(default)]
+    pub community_events: Option<crate::infra::change_outbox::CommunityEventsConfig>,
 }
 
 /// One `client_wiring` entry, read for its transport alone.

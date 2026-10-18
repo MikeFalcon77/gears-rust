@@ -158,7 +158,7 @@ harness = false
 # `benches/partition_cache.rs` - the two hot paths of the per-partition cache
 # were each once wrong in a way only a curve over a swept parameter reveals.
 criterion = { workspace = true, features = ["html_reports"] }
-tokio = { workspace = true, features = ["macros", "rt", "process"] }
+tokio = { workspace = true, features = ["macros", "rt", "process", "test-util"] }
 tower = { workspace = true }
 http = { workspace = true }
 tracing-test = { workspace = true }

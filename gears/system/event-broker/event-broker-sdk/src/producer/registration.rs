@@ -20,8 +20,8 @@ pub struct Model {
     pub mode: String,
     pub client_agent: String,
     pub generation: i64,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: DateTimeUtc,
+    pub updated_at: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -96,7 +96,7 @@ impl ProducerRegistrationStore {
         producer_id: ProducerId,
         client_agent: &str,
     ) -> Result<ProducerRegistration, EventBrokerError> {
-        let now = now_string();
+        let now = now_timestamp();
         let registration = ProducerRegistration {
             key: managed.key.clone(),
             producer_id,
@@ -110,7 +110,7 @@ impl ProducerRegistrationStore {
             mode: ActiveValue::Set(mode_to_str(registration.mode).to_owned()),
             client_agent: ActiveValue::Set(registration.client_agent.clone()),
             generation: ActiveValue::Set(registration.generation),
-            created_at: ActiveValue::Set(now.clone()),
+            created_at: ActiveValue::Set(now),
             updated_at: ActiveValue::Set(now),
         };
         let conn = self.db.conn().map_err(map_db_err)?;
@@ -126,7 +126,7 @@ impl ProducerRegistrationStore {
         producer_id: ProducerId,
     ) -> Result<ProducerRegistration, EventBrokerError> {
         let generation = current.generation + 1;
-        let now = now_string();
+        let now = now_timestamp();
         let conn = self.db.conn().map_err(map_db_err)?;
         let result = Entity::update_many()
             .col_expr(
@@ -221,8 +221,8 @@ fn mode_from_str(mode: &str) -> Result<ProducerMode, EventBrokerError> {
     }
 }
 
-fn now_string() -> String {
-    Utc::now().to_rfc3339()
+fn now_timestamp() -> DateTimeUtc {
+    Utc::now()
 }
 
 fn map_db_err(err: toolkit_db::DbError) -> EventBrokerError {

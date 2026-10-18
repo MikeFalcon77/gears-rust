@@ -52,7 +52,7 @@ impl<D, V, A, S> ReaderClient<D, V, A, S> {
 
 /// The consumer projection: no setter identity and no timestamps on the trail,
 /// so an ancestor's administrator is not exposed to a subordinate tenant.
-fn project(
+pub(crate) fn project(
     scope: String,
     value: &EffectiveValue,
 ) -> Result<EffectiveValueResponse, CanonicalError> {

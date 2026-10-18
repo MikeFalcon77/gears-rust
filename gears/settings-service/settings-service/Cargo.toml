@@ -28,7 +28,7 @@ integration = ["toolkit-db/pg"]
 [dependencies]
 # Trait boundaries of consumed SDKs are `CanonicalError` (ADR 0005).
 toolkit-canonical-errors = { workspace = true }
-settings-service-sdk = { workspace = true }
+settings-service-sdk = { workspace = true, features = ["rest-client", "rest-server"] }
 # `rest-client`: `#[toolkit::consumes]` needs the directory-resolving client to
 # exist, even though R1 binds the co-located provider (DESIGN.md §4.9).
 authz-resolver-sdk = { workspace = true, features = ["rest-client"] }
@@ -62,6 +62,8 @@ sea-orm-migration = { workspace = true }
 axum = { workspace = true }
 http = { workspace = true }
 toolkit = { workspace = true }
+toolkit-contract = { workspace = true }
+event-broker-sdk = { workspace = true, features = ["outbox", "rest-client"] }
 toolkit-db = { workspace = true }
 # The pending-secret sweep runs on the gear's managed lifecycle tick.
 tokio = { workspace = true, features = ["time", "macros", "rt"] }

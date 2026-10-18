@@ -40,6 +40,8 @@ fn the_harness_declares_its_migrations_in_order() {
             "m20260925_000001_audit_records_default_horizon_index".to_owned(),
             "m20260925_000002_audit_retention_policy".to_owned(),
             "m20260925_000003_audit_retention_policy_seed".to_owned(),
+            "m001_create_toolkit_outbox_schema__settings_events".to_owned(),
+            "m001_create_event_broker_producer_registrations".to_owned(),
         ]
     );
 }

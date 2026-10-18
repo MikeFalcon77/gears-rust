@@ -14,3 +14,7 @@ pub mod tenant_hierarchy;
 pub mod type_validator;
 pub mod value_writes;
 pub mod write_metrics;
+
+pub mod remote_reader;
+
+pub mod change_outbox;

@@ -10,6 +10,7 @@
 //! schemas and the category seed at init, which are still open. The marker
 //! lands with the tick.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -53,6 +54,7 @@ pub type ConcreteResolver = crate::domain::resolution::ValueResolver<
     crate::infra::storage::access_repo::AccessRepo,
 >;
 
+#[toolkit::provides(contract = settings_service_sdk::SettingsReadApi, local = Self::build_remote_reader, transports = [local, rest])]
 #[toolkit::consumes(contract = authz_resolver_sdk::AuthZResolverApi, from = "authz-resolver")]
 #[toolkit::gear(
     name = "settings-service",
@@ -62,6 +64,8 @@ pub type ConcreteResolver = crate::domain::resolution::ValueResolver<
 )]
 pub struct SettingsService {
     config: OnceLock<Arc<SettingsServiceConfig>>,
+    event_hub: OnceLock<Arc<toolkit::client_hub::ClientHub>>,
+    lifecycle_ready: Arc<AtomicBool>,
     db: OnceLock<Arc<DBProvider<DbError>>>,
     enforcer: OnceLock<Arc<PolicyEnforcer>>,
     types: OnceLock<Arc<dyn TypesRegistryClient>>,
@@ -93,6 +97,8 @@ impl Default for SettingsService {
     fn default() -> Self {
         Self {
             config: OnceLock::new(),
+            event_hub: OnceLock::new(),
+            lifecycle_ready: Arc::new(AtomicBool::new(false)),
             db: OnceLock::new(),
             enforcer: OnceLock::new(),
             types: OnceLock::new(),
@@ -144,6 +150,14 @@ const PRUNE_BATCHES: PruneBatches = PruneBatches {
 const REVIEW_TICK: Duration = Duration::from_mins(1);
 
 impl SettingsService {
+    fn build_remote_reader(
+        ctx: &GearCtx,
+        _policies: Arc<toolkit_contract::policy::PolicyStack>,
+    ) -> anyhow::Result<Arc<dyn settings_service_sdk::SettingsReadApi>> {
+        Ok(ctx
+            .client_hub()
+            .get::<crate::infra::remote_reader::RemoteReader>()?)
+    }
     /// The managed lifecycle: the pending-secret sweep and the needs-review
     /// gauge once a minute, and the audit retention pass once a day, until
     /// cancelled. The only long-running
@@ -160,6 +174,11 @@ impl SettingsService {
         let writes = self.writes()?;
         let db = self.db()?;
         let retention = Duration::from_hours(u64::from(self.config()?.audit_retention_days) * 24);
+        let event_handle = self.start_events(&db, &writes, &cancel).await?;
+        if cancel.is_cancelled() {
+            return Ok(());
+        }
+        self.lifecycle_ready.store(true, Ordering::Release);
         ready.notify();
         info!(
             tick_secs = SWEEP_TICK.as_secs(),
@@ -167,8 +186,35 @@ impl SettingsService {
         );
         let metrics = crate::infra::lifecycle_metrics::OtelLifecycleMetrics::new();
         Self::tick_until_cancelled(&writes, &db, retention, &metrics, &cancel).await;
+        self.lifecycle_ready.store(false, Ordering::Release);
+        if let Some(handle) = event_handle {
+            handle.stop().await;
+        }
         info!("pending-secret sweep and audit retention stopped");
         Ok(())
+    }
+
+    async fn start_events(
+        &self,
+        db: &DBProvider<DbError>,
+        writes: &crate::infra::value_writes::WriteCoordinator,
+        cancel: &CancellationToken,
+    ) -> anyhow::Result<Option<event_broker_sdk::producer::ProducerOutboxHandle>> {
+        Ok(if let Some(config) = &self.config()?.community_events {
+            Some(tokio::select! {
+                () = cancel.cancelled() => return Ok(None),
+                result = crate::infra::change_outbox::start(
+                    config,
+                    db,
+                    self.event_hub
+                        .get()
+                        .ok_or_else(|| anyhow::anyhow!("Settings hub unavailable"))?,
+                    writes,
+                ) => result?,
+            })
+        } else {
+            None
+        })
     }
 
     /// The periodic passes, until the lifecycle is cancelled.
@@ -498,6 +544,9 @@ impl Gear for SettingsService {
         // to fall back to: an absent required value fails startup here rather
         // than surfacing later as the service enforcing something nobody chose.
         let config: SettingsServiceConfig = ctx.config()?;
+        self.event_hub
+            .set(ctx.client_hub())
+            .map_err(|_| anyhow::anyhow!("Settings hub already initialized"))?;
         // @cpt-end:cpt-cf-settings-service-algo-gear-foundation-gear-init:p1:inst-gf-init-2
         // @cpt-end:cpt-cf-settings-service-algo-gear-foundation-gear-init:p1:inst-gf-init-1
 
@@ -671,11 +720,12 @@ impl Gear for SettingsService {
             Arc::new(crate::infra::write_metrics::LoggingPublisher),
             Arc::new(crate::infra::write_metrics::OtelWriteMetrics::new()),
         ));
+        let mut coordinator = crate::infra::value_writes::WriteCoordinator::new(self.db()?, writer);
+        if let Some(events) = &config.community_events {
+            coordinator = coordinator.with_event_tenants(events.tenants.clone());
+        }
         self.writes
-            .set(Arc::new(crate::infra::value_writes::WriteCoordinator::new(
-                self.db()?,
-                writer,
-            )))
+            .set(Arc::new(coordinator))
             .map_err(|_| anyhow::anyhow!("{} gear already initialized", Self::MODULE_NAME))?;
 
         // @cpt-begin:cpt-cf-settings-service-algo-gear-foundation-gear-init:p1:inst-gf-init-7
@@ -749,6 +799,15 @@ impl Gear for SettingsService {
             .map_err(|_| anyhow::anyhow!("{} gear already initialized", Self::MODULE_NAME))?;
 
         // @cpt-begin:cpt-cf-settings-service-algo-gear-foundation-gear-init:p1:inst-gf-init-12
+        ctx.client_hub()
+            .register::<crate::infra::remote_reader::RemoteReader>(Arc::new(
+                crate::infra::remote_reader::RemoteReader {
+                    db: self.db()?,
+                    resolver: self.resolver()?,
+                    enforcer: self.enforcer()?,
+                },
+            ));
+        self.wire_settings_read_api(ctx).await?;
         info!("Settings Service gear initialized");
         // @cpt-end:cpt-cf-settings-service-algo-gear-foundation-gear-init:p1:inst-gf-init-12
 
@@ -757,9 +816,15 @@ impl Gear for SettingsService {
 }
 
 impl RestApiCapability for SettingsService {
+    fn healthcheck(&self, _ctx: &GearCtx) -> Option<Arc<dyn toolkit::Healthcheck>> {
+        Some(Arc::new(SettingsReadiness(Arc::clone(
+            &self.lifecycle_ready,
+        ))))
+    }
+
     fn register_rest(
         &self,
-        _ctx: &GearCtx,
+        ctx: &GearCtx,
         router: axum::Router,
         openapi: &dyn OpenApiRegistry,
     ) -> anyhow::Result<axum::Router> {
@@ -768,6 +833,12 @@ impl RestApiCapability for SettingsService {
             .get()
             .ok_or_else(|| anyhow::anyhow!("category service not initialized"))?
             .clone();
+        let router = settings_service_sdk::rest::register_settings_read_api_rest_routes(
+            router,
+            openapi,
+            ctx.client_hub()
+                .get::<dyn settings_service_sdk::SettingsReadApi>()?,
+        );
         let declarations = self
             .declarations
             .get()
@@ -851,3 +922,22 @@ impl DatabaseCapability for SettingsService {
 #[cfg(test)]
 #[path = "gear_tests.rs"]
 mod gear_tests;
+
+/// Lifecycle failure must not leave the HTTP worker advertising readiness.
+struct SettingsReadiness(Arc<AtomicBool>);
+#[async_trait]
+impl toolkit::Healthcheck for SettingsReadiness {
+    fn name(&self) -> &'static str {
+        "settings-service-readiness"
+    }
+    async fn check(&self) -> toolkit::HealthcheckResult {
+        if self.0.load(Ordering::Acquire) {
+            toolkit::HealthcheckResult::healthy()
+        } else {
+            toolkit::HealthcheckResult::unhealthy(
+                "Settings lifecycle and event producer are not ready",
+            )
+            .with_code("starting")
+        }
+    }
+}

@@ -7,7 +7,8 @@
 //! (D5's component-boundary rule: "we always work with backend out-of-tx")
 //! -> acks/retries/rejects based on the outcome, and - on success - publishes
 //! a `domain::notify` wake-up notification (design.md D6) for delivery's
-//! stream loop to pick up on its next iteration.
+//! retained notification consumers. Current stream delivery uses the partition
+//! loader and its local readiness notifications; it does not watch these keys.
 //! `LeasedMessageHandler::handle`'s own signature (`&self, msg:
 //! &OutboxMessage) -> MessageResult`, with no DB handle at all) is what
 //! makes that rule structurally true here, not just conventional.
@@ -60,7 +61,7 @@ impl IngestOutboxHandler {
     /// `Reject` - the event is already durably persisted by this point, and
     /// the notification is only a wake-up hint (design.md D6), not part of
     /// this handler's durability contract. A missed notification costs
-    /// delivery's stream loop one extra heartbeat-interval wait, not a
+    /// an optional notification consumer an extra timeout, not a
     /// correctness bug.
     async fn notify(&self, topic_id: &toolkit_gts::GtsInstanceId, partition: i32) {
         // Derived from the identifier, not looked up: the key has to be the

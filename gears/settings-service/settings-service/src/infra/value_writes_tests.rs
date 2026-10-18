@@ -1890,3 +1890,69 @@ async fn a_secret_write_with_a_stale_or_missing_tag_never_reaches_the_store() {
     .expect("current tag");
     assert_eq!(h.stores(), stores_after_first + 1);
 }
+
+#[tokio::test]
+async fn event_enqueue_failure_rolls_back_the_value_and_its_audit_record() {
+    use event_broker_sdk::{
+        api::EventBrokerApi,
+        producer::{DbDeduplication, DbProducer, ProducerIdentity},
+        rest::RestBroker,
+    };
+    use toolkit_db::outbox::{Outbox, Partitions};
+    let mut h = Harness::new().await;
+    let declaration = h.declare("transactional", scope_class::LOCAL).await;
+    let root = h.base.tree.root;
+    toolkit_db::migration_runner::run_migrations_for_testing(
+        &h.base.db.db(),
+        crate::infra::change_outbox::migrations(),
+    )
+    .await
+    .expect("outbox migrations");
+    // No HTTP request is made: the unprepared typed schema rejects enqueue
+    // inside the business transaction after commit_in wrote value and audit.
+    let broker: Arc<dyn EventBrokerApi> =
+        Arc::new(RestBroker::new("http://127.0.0.1:1").expect("URL"));
+    let producer = DbProducer::builder()
+        .broker(broker)
+        .db(h.base.db.db())
+        .security_context(crate::test_support::service_context_for(root))
+        .identity(ProducerIdentity::new().source("settings-service"))
+        .deduplication(DbDeduplication::stateless())
+        .topics(["gts.cf.core.events.topic.v1~cf.demo.settings.changed.v1"])
+        .event_type_patterns(["gts.cf.core.events.event.v1~cf.demo.settings.changed.v1~"])
+        .lazy_validation()
+        .build()
+        .await
+        .expect("lazy producer");
+    let handle = producer
+        .outbox_queue("settings-changes", Partitions::of(1))
+        .expect("queue")
+        .start(
+            Outbox::builder(h.base.db.db())
+                .table_prefix("settings_events")
+                .expect("prefix"),
+        )
+        .await
+        .expect("outbox");
+    h.coordinator = h.coordinator.with_event_tenants(vec![root]);
+    h.coordinator
+        .install_event_outbox(handle.outbox().clone())
+        .expect("install");
+    let err = h
+        .set(
+            &actor(root),
+            "transactional",
+            None,
+            json!(true),
+            Some("absent"),
+        )
+        .await
+        .expect_err("enqueue rejected");
+    assert!(matches!(err, DomainError::Internal { .. }));
+    assert!(h.rows(declaration).await.is_empty(), "value must roll back");
+    assert!(
+        h.history_records("transactional").await.is_empty(),
+        "audit must roll back too"
+    );
+    handle.stop().await;
+}
