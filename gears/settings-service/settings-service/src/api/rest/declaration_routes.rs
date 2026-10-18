@@ -76,6 +76,7 @@ pub fn register_routes(
     // @cpt-begin:cpt-cf-settings-service-flow-setting-declarations-read:p1:inst-decl-read-1
     let router = OperationBuilder::get("/settings-service/v1/declarations")
         .operation_id("settings_service.list_declarations")
+        .exposed()
         .summary("List setting declarations")
         .description(
             "List declarations visible to the caller. Supports OData `$filter` over \

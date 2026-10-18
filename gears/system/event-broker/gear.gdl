@@ -31,10 +31,17 @@ gear(
         path = "./event-broker",
     ),
 
-    # The two required fields of `EventBrokerConfig`; the other six sections all
-    # default and are edited in the file rather than put in front of an
-    # integrator. Their names, types and doc comments are read from the struct.
-    config_schema = config(exposes = ["mode", "default_storage_backend"]),
+    # Expose deployment and streaming settings used by prepared products.
+    # Field names, types and doc comments are read from EventBrokerConfig.
+    config_schema = config(exposes = ["mode", "default_storage_backend", "topics", "streaming", "polling"]),
+
+    # The runtime resolves this profile for all three facades, including the
+    # cache-backed defaults for lock and leader election in standalone mode.
+    requires = [
+        cluster.cache(profile = "event-broker", capabilities = [cluster_cap.linearizable]),
+        cluster.leader_election(profile = "event-broker"),
+        cluster.lock(profile = "event-broker"),
+    ],
 
     # The role split ADR cpt-cf-adr-instance-addressable-discovery decides, and
     # this gear is its worked example. Each role registers under its own

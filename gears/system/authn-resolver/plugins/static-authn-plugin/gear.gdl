@@ -32,6 +32,6 @@ gear(
 
     # `mode` is an enum, and its variants are read from AuthNMode rather than
     # listed here -- adding one needs no change to this file or to Gearbox.
-    # `tokens` and `default_identity` are nested and stay in the config file.
-    config_schema = config(exposes = ["vendor", "priority", "mode"]),
+    # Strict token and S2S mappings may be supplied by prepared products.
+    config_schema = config(exposes = ["vendor", "priority", "mode", "tokens", "s2s_credentials"]),
 )

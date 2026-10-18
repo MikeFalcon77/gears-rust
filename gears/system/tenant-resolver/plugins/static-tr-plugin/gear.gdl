@@ -28,5 +28,5 @@ gear(
 
     # `tenants` is a list with a single-root invariant no control can express,
     # so it stays in the configuration file.
-    config_schema = config(exposes = ["vendor", "priority"]),
+    config_schema = config(exposes = ["vendor", "priority", "tenants"]),
 )

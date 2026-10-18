@@ -147,6 +147,22 @@ impl Service {
             return Self::deny();
         }
 
+        // A capability check on an unscoped resource has no row properties.
+        // Keep the tenant/hierarchy decision above, but do not emit an owner
+        // predicate the PEP explicitly cannot compile. Row-scoped checks and
+        // group selectors retain their constraints and fail closed as before.
+        if response.decision
+            && !request.context.require_constraints
+            && request.context.supported_properties.is_empty()
+            && !request.resource.properties.contains_key("group_ids")
+            && !request
+                .resource
+                .properties
+                .contains_key("ancestor_group_ids")
+        {
+            response.context.constraints.clear();
+        }
+
         response
     }
 

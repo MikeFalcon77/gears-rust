@@ -377,6 +377,49 @@ mod database_merge {
         }
     }
 
+    #[tokio::test]
+    async fn colocated_dependency_databases_survive_oop_merge() {
+        let home = tempfile::tempdir().unwrap();
+        let mut config = minimal_app_config();
+        for name in ["settings-service", "credstore", "types-registry"] {
+            config.gears.insert(
+                name.to_owned(),
+                json!({
+                    "database": {"engine": "sqlite", "file": "metadata.sqlite3"}
+                }),
+            );
+        }
+        let DbOptions::Manager(manager) =
+            build_merged_db_options(home.path(), "settings-service", None, &config).unwrap()
+        else {
+            panic!("co-located databases require a manager")
+        };
+        for name in ["settings-service", "credstore", "types-registry"] {
+            assert!(manager.get(name).await.unwrap().is_some(), "missing {name}");
+            assert!(home.path().join(name).join("metadata.sqlite3").exists());
+        }
+        assert!(manager.get("unconfigured").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn dependency_database_is_kept_when_anchor_has_no_database() {
+        let home = tempfile::tempdir().unwrap();
+        let mut config = minimal_app_config();
+        config.gears.insert(
+            "credstore".to_owned(),
+            json!({
+                "database": {"engine": "sqlite", "file": "dependency.sqlite3"}
+            }),
+        );
+        let DbOptions::Manager(manager) =
+            build_merged_db_options(home.path(), "stateless-anchor", None, &config).unwrap()
+        else {
+            panic!("dependency database must create a manager")
+        };
+        assert!(manager.get("credstore").await.unwrap().is_some());
+        assert!(manager.get("stateless-anchor").await.unwrap().is_none());
+    }
+
     #[test]
     fn test_rendered_db_config_no_database() {
         // When no database config, result should be DbOptions::None

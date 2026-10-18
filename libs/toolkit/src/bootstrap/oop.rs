@@ -268,9 +268,8 @@ fn build_merged_db_options(
     let has_local_db = local_config.database.is_some()
         || local_config
             .gears
-            .get(gear_name)
-            .and_then(|m| m.get("database"))
-            .is_some();
+            .values()
+            .any(|gear| gear.get("database").is_some());
 
     if !has_rendered_db && !has_local_db {
         debug!(
@@ -322,17 +321,19 @@ fn build_merged_db_options(
         }
     }
 
-    // Local gear database config
-    if let Some(local_gear) = local_config.gears.get(gear_name)
-        && let Some(local_gear_db) = local_gear.get("database")
-    {
+    // Preserve databases for every co-located gear, including dependencies.
+    // The anchor is not the only database consumer in an OoP application.
+    for (local_gear_name, local_gear) in &local_config.gears {
+        let Some(local_gear_db) = local_gear.get("database") else {
+            continue;
+        };
         let gears = merged_config
             .entry("gears".to_owned())
             .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
 
         if let Some(gears_obj) = gears.as_object_mut() {
             let gear_entry = gears_obj
-                .entry(gear_name.to_owned())
+                .entry(local_gear_name.to_owned())
                 .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
 
             if let Some(gear_obj) = gear_entry.as_object_mut() {

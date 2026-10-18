@@ -40,6 +40,7 @@ gear(
         "streaming_idle_timeout_secs",
         "protocol_cache_ttl_secs",
         "management_api_enabled",
+        "ssrf_policy",
     ]),
 
     # `fips` restricts TLS to FIPS-approved suites, a real deployment choice.

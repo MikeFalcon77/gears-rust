@@ -3679,6 +3679,7 @@ dependencies = [
  "inventory",
  "secrecy",
  "serde",
+ "temp-env",
  "tokio",
  "tracing",
  "uuid",

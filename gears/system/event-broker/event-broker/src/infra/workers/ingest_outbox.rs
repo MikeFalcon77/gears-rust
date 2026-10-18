@@ -120,7 +120,20 @@ impl LeasedMessageHandler for IngestOutboxHandler {
 
         let backend = self.backend_resolver.resolve(&topic);
         let topic_str = topic.id.to_string();
-        let sdk_event = to_sdk_event(partition, &event);
+        let mut sdk_event = to_sdk_event(partition, &event);
+        // Producer protocol sequencing is already checked transactionally by
+        // ingest. The backend sees one ordered relay per topic partition:
+        // use the durable outbox sequence for retry dedup, not a publisher's
+        // counter (two independent producers both legitimately start at 1).
+        // Every topic partition maps to one stable outbox partition, so these
+        // numbers remain ordered and unchanged across retries and restarts.
+        sdk_event.meta = Some(event_broker_sdk::models::ProducerMeta {
+            version: 1,
+            producer_id: None,
+            previous: None,
+            sequence: Some(msg.seq),
+            partition_hint: None,
+        });
 
         match backend
             .persist(
@@ -289,7 +302,7 @@ mod tests {
     /// crash between `persist()` succeeding and the row being marked done
     /// - must not double-append, because `SqliteEventBackend::persist`'s
     /// own outbox-retry dedup (design.md D4, task 5.4) compares the
-    /// event's producer chain sequence against the stored
+    /// durable outbox sequence against the stored
     /// `last_chain_sequence` for the partition, not `event.id`.
     #[tokio::test]
     async fn redelivery_after_persist_is_a_safe_noop() {
@@ -327,6 +340,68 @@ mod tests {
             1,
             "redelivery must not durably append the event a second time"
         );
+        assert_eq!(events[0].id, event.id);
+    }
+
+    #[tokio::test]
+    async fn independent_producers_starting_at_one_are_both_persisted() {
+        let (handler, backend) = test_handler().await;
+        let first = test_event(1);
+        let second = test_event(1);
+        assert_ne!(
+            first.meta.as_ref().unwrap().producer_id,
+            second.meta.as_ref().unwrap().producer_id
+        );
+        let first_message = test_message(&first);
+        let mut second_message = test_message(&second);
+        second_message.seq = 2;
+        assert!(matches!(
+            handler.handle(&first_message).await,
+            MessageResult::Ok
+        ));
+        assert!(matches!(
+            handler.handle(&second_message).await,
+            MessageResult::Ok
+        ));
+        assert!(matches!(
+            handler.handle(&second_message).await,
+            MessageResult::Ok
+        ));
+        let events = backend
+            .read(
+                &SecurityContext::anonymous(),
+                TOPIC_ID,
+                0,
+                Sequence::assigned(0),
+                100,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            events.iter().map(|event| event.id).collect::<Vec<_>>(),
+            vec![first.id, second.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn stateless_event_redelivery_is_deduplicated_at_the_relay_boundary() {
+        let (handler, backend) = test_handler().await;
+        let mut event = test_event(1);
+        event.meta = None;
+        let message = test_message(&event);
+        assert!(matches!(handler.handle(&message).await, MessageResult::Ok));
+        assert!(matches!(handler.handle(&message).await, MessageResult::Ok));
+        let events = backend
+            .read(
+                &SecurityContext::anonymous(),
+                TOPIC_ID,
+                0,
+                Sequence::assigned(0),
+                100,
+            )
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, event.id);
     }
 

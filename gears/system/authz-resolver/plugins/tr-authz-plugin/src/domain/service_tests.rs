@@ -772,3 +772,31 @@ async fn single_resource_missing_owner_tenant_id_denies() {
     .await;
     assert!(!resp.decision);
 }
+
+#[tokio::test]
+async fn unscoped_capability_check_does_not_emit_unsupported_owner_predicates() {
+    let tenant = Uuid::now_v7();
+    let svc = Service::new(Arc::new(MockTenantResolver::with_tenants(tenant, vec![])));
+    let mut request = make_request(tenant);
+    request.context.require_constraints = false;
+    request.context.supported_properties.clear();
+    let result = svc.evaluate(&request).await;
+    assert!(result.decision);
+    assert!(result.context.constraints.is_empty());
+
+    request.context.supported_properties = vec!["owner_tenant_id".to_owned()];
+    let scoped = svc.evaluate(&request).await;
+    assert!(scoped.decision);
+    assert!(
+        !scoped.context.constraints.is_empty(),
+        "tenant scope must remain constrained"
+    );
+}
+
+#[tokio::test]
+async fn unscoped_capability_check_still_denies_missing_tenant() {
+    let svc = Service::new(Arc::new(MockTenantResolver::empty()));
+    let mut request = make_request_no_tenant();
+    request.context.require_constraints = false;
+    assert!(!svc.evaluate(&request).await.decision);
+}

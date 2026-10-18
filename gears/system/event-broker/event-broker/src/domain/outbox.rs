@@ -2,8 +2,8 @@
 //! dedicated envelope type: `IngestServiceImpl::publish_event` enqueues the
 //! `domain::model::Event` it already has (partition already stamped) as
 //! JSON directly - `infra::workers::ingest_outbox::IngestOutboxHandler`
-//! decodes the same type back and reuses `domain::backend::to_sdk_event`
-//! unchanged, so nothing here duplicates that conversion.
+//! decodes the same type back and reuses `domain::backend::to_sdk_event`,
+//! then stamps its own durable relay sequence for backend retry deduplication.
 
 /// `toolkit_db::outbox` queue name for the ingest publish path.
 pub const INGEST_QUEUE_NAME: &str = "evbk-ingest";
