@@ -223,6 +223,22 @@ impl SsrfGuard {
         self.extra_deny.iter().any(|cidr| cidr.contains(ip))
     }
 
+    /// Check a DNS result for an endpoint. Explicit hostname exemptions also
+    /// cover that hostname's resolved addresses; ordinary public hostnames still
+    /// undergo IP checks on every resolution to prevent DNS rebinding.
+    #[must_use]
+    pub fn is_resolved_ip_blocked(&self, host: &str, ip: IpAddr) -> bool {
+        let normalized = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
+        if self
+            .allow_hostnames
+            .iter()
+            .any(|pattern| hostname_matches(&normalized, pattern))
+        {
+            return false;
+        }
+        self.is_hostname_blocked(host).is_some() || self.is_ip_blocked(ip)
+    }
+
     /// Human-readable block reason, or `"allowed"`.
     #[must_use]
     pub fn ip_block_reason(&self, ip: IpAddr) -> &str {
@@ -1292,6 +1308,33 @@ mod tests {
         });
         assert!(e.is_hostname_blocked("evil.internal").is_some());
         assert!(e.is_hostname_blocked("svc.safe.internal").is_none());
+    }
+
+    #[test]
+    fn resolved_ip_exemption_is_scoped_to_configured_hostname() {
+        let e = guard(SsrfPolicy {
+            allow_hostnames: vec!["demo-echo.demo.svc.cluster.local".into()],
+            ..Default::default()
+        });
+        let private = "10.111.56.200".parse().unwrap();
+        assert!(!e.is_resolved_ip_blocked("DEMO-ECHO.demo.svc.cluster.local.", private));
+        assert!(e.is_resolved_ip_blocked("other.demo.svc.cluster.local", private));
+        assert!(e.is_resolved_ip_blocked("demo-echo.demo.svc.cluster.local.attacker.org", private));
+        assert!(e.is_resolved_ip_blocked("public.example", "169.254.169.254".parse().unwrap()));
+        assert!(e.is_ip_blocked(private));
+    }
+
+    #[test]
+    fn resolved_ip_applies_suffix_exemptions_and_hostname_denials() {
+        let e = guard(SsrfPolicy {
+            allow_hostnames: vec![".safe.internal".into()],
+            extra_deny_hostnames: vec!["blocked.example".into()],
+            ..Default::default()
+        });
+        assert!(!e.is_resolved_ip_blocked("svc.safe.internal", "10.0.0.1".parse().unwrap()));
+        assert!(e.is_resolved_ip_blocked("svc.unsafe.internal", "10.0.0.1".parse().unwrap()));
+        assert!(e.is_resolved_ip_blocked("blocked.example", "8.8.8.8".parse().unwrap()));
+        assert!(!e.is_resolved_ip_blocked("public.example", "8.8.8.8".parse().unwrap()));
     }
 
     #[test]

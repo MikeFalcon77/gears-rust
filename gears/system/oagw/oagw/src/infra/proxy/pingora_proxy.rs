@@ -279,7 +279,7 @@ impl DnsDiscovery {
             match resolved {
                 Ok(addrs) => {
                     for sock in addrs {
-                        if self.ssrf_guard.is_ip_blocked(sock.ip()) {
+                        if self.ssrf_guard.is_resolved_ip_blocked(&ep.host, sock.ip()) {
                             warn!(
                                 addr = %addr_str,
                                 resolved_ip = %sock.ip(),
@@ -607,7 +607,7 @@ impl ProxyHttp for PingoraProxy {
                 let filtered: Vec<_> = addrs
                     .into_iter()
                     .filter(|sock| {
-                        if self.ssrf_guard.is_ip_blocked(sock.ip()) {
+                        if self.ssrf_guard.is_resolved_ip_blocked(&ep.host, sock.ip()) {
                             warn!(
                                 upstream_id = ?ctx.upstream_id,
                                 host = %ep.host,
@@ -1622,6 +1622,25 @@ mod tests {
             "localhost resolves to 127.0.0.1 which should be blocked"
         );
         assert!(map.is_empty());
+    }
+
+    /// A trusted hostname exemption survives DNS filtering without disabling the guard.
+    #[tokio::test]
+    async fn dns_discovery_ssrf_allows_explicit_hostname() {
+        let guard = SsrfGuard::from_config(&crate::domain::ssrf::SsrfPolicy {
+            allow_hostnames: vec!["localhost".into()],
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(guard.is_enabled());
+        let discovery = DnsDiscovery::new(
+            vec![ep("localhost", 9999, Scheme::Http)],
+            make_addr_map(),
+            Arc::new(guard),
+        );
+        let (backends, map) = discovery.resolve().await;
+        assert!(!backends.is_empty());
+        assert!(map.values().all(|endpoint| endpoint.host == "localhost"));
     }
 
     /// With ssrf_protection=true, selector returns Err(NoBackendsResolved) for loopback.
