@@ -1,6 +1,7 @@
 //! Gateway adapter consuming the authorized Settings contract over REST.
 use async_trait::async_trait;
 use axum::{Extension, Json, Router};
+mod registry;
 use settings_service_sdk::{
     SettingsReadApi,
     models::{EffectiveValueResponse, GetEffectiveRequest},
@@ -72,6 +73,8 @@ impl RestApiCapability for FamilyLabsApi {
         parent: Router,
         openapi: &dyn OpenApiRegistry,
     ) -> anyhow::Result<Router> {
+        let reader = registry::Reader::new()?;
+        let router = registry::register(Router::new(), openapi, reader);
         let router = OperationBuilder::get("/family-labs/v1/me")
             .operation_id("family_labs.identity")
             .summary("Read the authenticated subject and home tenant")
@@ -86,7 +89,7 @@ impl RestApiCapability for FamilyLabsApi {
                 "Authenticated identity",
             )
             .error_401(openapi)
-            .register(Router::new(), openapi);
+            .register(router, openapi);
         let router = OperationBuilder::post("/family-labs/v1/effective:read")
             .operation_id("family_labs.effective")
             .summary("Read effective public settings through the worker contract")

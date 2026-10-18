@@ -6,7 +6,7 @@ use serde_json::json;
 use settings_service_sdk::{
     SettingKey,
     api::SettingsContributionClient,
-    catalogue::{BOOL_FLAG, STRING},
+    catalogue::{BOOL_FLAG, NUMBER, STRING},
     models::{ContributedDeclaration, ScopeClass},
 };
 use std::num::NonZeroU32;
@@ -32,6 +32,12 @@ fn declarations() -> anyhow::Result<Vec<ContributedDeclaration>> {
             BOOL_FLAG,
             json!(false),
             "Approve the ice cream deployment.",
+        ),
+        (
+            "scoops_per_person",
+            NUMBER,
+            json!(2),
+            "The number of scoops per person.",
         ),
         (
             "lab_message",

@@ -2723,6 +2723,7 @@ dependencies = [
  "cf-gears-settings-service-sdk",
  "cf-gears-toolkit",
  "cf-gears-toolkit-canonical-errors",
+ "cf-gears-toolkit-http",
  "cf-gears-toolkit-macros",
  "cf-gears-toolkit-security",
  "cf-gears-types-registry",

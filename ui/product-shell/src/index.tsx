@@ -13,7 +13,7 @@ import { initializeApp } from "firebase/app";
 import {
   browserSessionPersistence,
   getAuth,
-  onIdTokenChanged,
+  onAuthStateChanged,
   setPersistence,
   signInWithPopup,
   GoogleAuthProvider,
@@ -30,15 +30,13 @@ import {
 } from "lucide-react";
 import {
   ApiClient,
+  EventFeed,
+  browserTabId,
   type GearUiPlugin,
   type GearRuntime,
   type Identity,
   type RuntimeConfig,
 } from "@gears/ui-sdk";
-const labNames: Record<string, string> = {
-  "d0000000-0000-4000-8000-000000000002": "Dasha’s Lab",
-  "a0000000-0000-4000-8000-000000000003": "Ilya’s Lab",
-};
 class PageBoundary extends Component<
   { children: ReactNode },
   { failed: boolean }
@@ -141,7 +139,7 @@ function ConfiguredShell({
     setPersistence(auth, browserSessionPersistence)
       .then(() => {
         if (closed) return;
-        unsubscribe = onIdTokenChanged(auth, async (next) => {
+        unsubscribe = onAuthStateChanged(auth, async (next) => {
           const current = ++generation.current;
           session?.abort();
           session = new AbortController();
@@ -162,11 +160,20 @@ function ConfiguredShell({
               (force) => next.getIdToken(force),
               abort.signal,
             );
-            const identity = await api.json<Identity>("/family-labs/v1/me");
+            const identity = await api.json<Identity>(config.identityPath);
             if (!identity.subject_id || !identity.tenant_id)
               throw Error("Invalid identity response");
             if (closed || generation.current !== current) return;
             setRuntime({
+              events: new EventFeed({
+                api,
+                identity,
+                signal: abort.signal,
+                tabId: browserTabId(),
+                storage: sessionStorage,
+                topic: config.events.topic,
+                eventType: config.events.type,
+              }),
               api,
               identity,
               query,
@@ -202,7 +209,9 @@ function ConfiguredShell({
   const login = async () => {
     setError("");
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithPopup(auth, provider);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Sign-in failed.");
     }
@@ -240,7 +249,8 @@ function ConfiguredShell({
         </span>
       </main>
     );
-  const name = labNames[runtime.identity.tenant_id] || "Your laboratory";
+  const name =
+    config.tenants[runtime.identity.tenant_id]?.name || "Your laboratory";
   return (
     <QueryClientProvider client={query}>
       <div className="product-shell">
@@ -248,7 +258,8 @@ function ConfiguredShell({
           <a className="wordmark" href="#">
             <Boxes size={27} />
             <span>
-              Family Labs<small>POWERED BY GEARS</small>
+              {config.productName}
+              <small>POWERED BY GEARS</small>
             </span>
           </a>
           <div className="tenant-label">
@@ -298,7 +309,9 @@ function ConfiguredShell({
           <main>
             <div className="page-heading">
               <div>
-                <p className="eyebrow">FAMILY LABS / {page?.module}</p>
+                <p className="eyebrow">
+                  {config.productName.toUpperCase()} / {page?.module}
+                </p>
                 <h1>{page?.title || "Welcome"}</h1>
               </div>
               <span className="version-badge">Gears · Live product</span>
@@ -345,7 +358,7 @@ function ConfiguredShell({
           </main>
           <footer>
             Declared in GDL. Running on Kubernetes.
-            <span>Family Labs · Community Edition</span>
+            <span>{config.productName} · Community Edition</span>
           </footer>
         </section>
         {toast && (

@@ -9,8 +9,8 @@
 SETTINGS_READ_SDK = cargo(crate_name = "cf-gears-settings-service-sdk", lib = "cf_gears_settings_service_sdk", path = "../settings-service-sdk", features = ["rest-client"])
 
 gear(
-    ui = ui_module(package = path("../ui"), requires = ["settings-service", "family-labs-api", "event-broker"]),
-    gdl_version = "1.0",
+    ui = ui_module(package = path("../ui"), requires = ["settings-service", "event-broker"]),
+    gdl_version = "1.2",
     source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/settings-service/settings-service"),
     maturity = "preview",
     implementation = "in-progress",

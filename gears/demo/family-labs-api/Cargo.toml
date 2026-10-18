@@ -25,3 +25,5 @@ serde_json = { workspace = true }
 oagw = { workspace = true }
 types-registry = { workspace = true }
 types-registry-sdk = { workspace = true }
+
+toolkit-http = { workspace = true }

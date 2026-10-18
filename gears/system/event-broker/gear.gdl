@@ -14,7 +14,8 @@
 # Declaring any of them here is GBX0210, which names the owning attribute.
 
 gear(
-    gdl_version = "1.0",
+    gdl_version = "1.2",
+    ui = ui_module(package = path("ui"), requires = ["event-broker"]),
     source = git(url = "https://github.com/constructorfabric/gears-rust", path = "gears/system/event-broker"),
     maturity = "preview",
     implementation = "in-progress",

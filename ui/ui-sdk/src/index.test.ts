@@ -33,6 +33,9 @@ describe("authenticated UI transport", () => {
       "//attacker.example/path",
       "https://attacker.example",
       "/../outside",
+      "/%2e%2e/outside",
+      "/\t/attacker.example",
+      "/a\n/b",
       "/" + String.fromCharCode(92) + "attacker.example",
     ])
       await expect(client.request(route)).rejects.toThrow();
@@ -98,4 +101,20 @@ it("partitions all query state by identity and tenant", () => {
   expect(queryKey(first, "settings")).not.toEqual(
     queryKey({ ...first, subject_id: "two" }, "settings"),
   );
+});
+
+it("refreshes an expired credential once without replacing the runtime", async () => {
+  const token = vi.fn(async (force?: boolean) => (force ? "fresh" : "stale"));
+  let calls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      ++calls === 1 ? new Response("{}", { status: 401 }) : new Response("{}"),
+    ),
+  );
+  const session = new AbortController();
+  await new ApiClient("/api", token, session.signal).json("/one");
+  expect(token.mock.calls).toEqual([[false], [true]]);
+  expect(session.signal.aborted).toBe(false);
+  expect(calls).toBe(2);
 });

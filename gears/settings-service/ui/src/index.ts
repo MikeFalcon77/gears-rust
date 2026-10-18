@@ -12,5 +12,11 @@ export const plugin: GearUiPlugin = {
       load: () => import("./settings-page"),
     },
   ],
-  widgets: [],
+  widgets: [
+    {
+      id: "laboratory-approval",
+      title: "Mission control",
+      load: () => import("./lab-widget"),
+    },
+  ],
 };
