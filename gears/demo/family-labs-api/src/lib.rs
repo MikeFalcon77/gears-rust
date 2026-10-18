@@ -28,6 +28,19 @@ impl Gear for FamilyLabsApi {
         Ok(())
     }
 }
+/// Identity resolved by backend authentication, never selected by browser input.
+#[derive(Debug, Clone)]
+#[toolkit_macros::api_dto(response)]
+pub struct SessionIdentity {
+    pub subject_id: String,
+    pub tenant_id: String,
+}
+async fn identity(Extension(ctx): Extension<SecurityContext>) -> Json<SessionIdentity> {
+    Json(SessionIdentity {
+        subject_id: ctx.subject_id().to_string(),
+        tenant_id: ctx.subject_tenant_id().to_string(),
+    })
+}
 async fn effective(
     Extension(ctx): Extension<SecurityContext>,
     Extension(hub): Extension<Arc<ClientHub>>,
@@ -56,9 +69,24 @@ impl RestApiCapability for FamilyLabsApi {
     fn register_rest(
         &self,
         ctx: &GearCtx,
-        router: Router,
+        parent: Router,
         openapi: &dyn OpenApiRegistry,
     ) -> anyhow::Result<Router> {
+        let router = OperationBuilder::get("/family-labs/v1/me")
+            .operation_id("family_labs.identity")
+            .summary("Read the authenticated subject and home tenant")
+            .tag("Family Labs")
+            .authenticated()
+            .no_license_required()
+            .exposed()
+            .handler(identity)
+            .json_response_with_schema::<SessionIdentity>(
+                openapi,
+                StatusCode::OK,
+                "Authenticated identity",
+            )
+            .error_401(openapi)
+            .register(Router::new(), openapi);
         let router = OperationBuilder::post("/family-labs/v1/effective:read")
             .operation_id("family_labs.effective")
             .summary("Read effective public settings through the worker contract")
@@ -79,26 +107,28 @@ impl RestApiCapability for FamilyLabsApi {
             .error_404(openapi)
             .error_503(openapi)
             .register(router, openapi);
-        Ok(OperationBuilder::post("/family-labs/v1/effective:readBulk")
-            .operation_id("family_labs.effective_bulk")
-            .summary("Read a bounded set of public settings through the worker contract")
-            .tag("Family Labs")
-            .authenticated()
-            .no_license_required()
-            .exposed()
-            .json_request::<BulkEffectiveRequest>(openapi, "Keys and target scope")
-            .handler(bulk)
-            .json_array_response_with_schema::<RemoteBulkOutcome>(
-                openapi,
-                StatusCode::OK,
-                "Per-key outcomes",
-            )
-            .error_400(openapi)
-            .error_401(openapi)
-            .error_403(openapi)
-            .error_503(openapi)
-            .register(router, openapi)
-            .layer(Extension(ctx.client_hub())))
+        Ok(parent.merge(
+            OperationBuilder::post("/family-labs/v1/effective:readBulk")
+                .operation_id("family_labs.effective_bulk")
+                .summary("Read a bounded set of public settings through the worker contract")
+                .tag("Family Labs")
+                .authenticated()
+                .no_license_required()
+                .exposed()
+                .json_request::<BulkEffectiveRequest>(openapi, "Keys and target scope")
+                .handler(bulk)
+                .json_array_response_with_schema::<RemoteBulkOutcome>(
+                    openapi,
+                    StatusCode::OK,
+                    "Per-key outcomes",
+                )
+                .error_400(openapi)
+                .error_401(openapi)
+                .error_403(openapi)
+                .error_503(openapi)
+                .register(router, openapi)
+                .layer(Extension(ctx.client_hub())),
+        ))
     }
 }
 
@@ -123,7 +153,7 @@ fn echo_declarations() -> Vec<serde_json::Value> {
             "server": {"endpoints": [{"scheme": "http", "host": "demo-echo.gearbox-demo.svc.cluster.local", "port": 8080}]},
             "protocol": "gts.cf.core.oagw.protocol.v1~cf.core.oagw.http.v1",
             "auth": {"type": "gts.cf.core.oagw.auth_plugin.v1~cf.core.oagw.noop.v1"},
-            "headers": {"request": {"passthrough": "allowlist", "passthrough_allowlist": ["x-request-id"], "remove": ["authorization", "cookie"]}},
+            "headers": {"request": {"passthrough": "allowlist", "passthrough_allowlist": ["x-request-id"], "remove": ["authorization", "cookie"], "set": {"x-demo-upstream": upstream, "x-demo-owner-tenant": tenant}}},
             "tags": ["family-labs"], "enabled": true
         }));
         entities.push(serde_json::json!({

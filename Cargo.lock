@@ -2723,11 +2723,14 @@ dependencies = [
  "cf-gears-settings-service-sdk",
  "cf-gears-toolkit",
  "cf-gears-toolkit-canonical-errors",
+ "cf-gears-toolkit-macros",
  "cf-gears-toolkit-security",
  "cf-gears-types-registry",
  "cf-gears-types-registry-sdk",
  "inventory",
+ "serde",
  "serde_json",
+ "utoipa",
 ]
 
 [[package]]
