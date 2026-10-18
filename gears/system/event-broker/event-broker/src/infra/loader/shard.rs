@@ -72,9 +72,10 @@ impl<S: EventSource + Send + Sync + 'static> ShardLoader<S> {
                 );
             }
 
-            // A round that fetched something is likely to find more immediately,
-            // so only an idle round pays the tick.
-            if report.fetches_issued() == 0 {
+            // Successful fetches can make immediate progress. A failed backend
+            // must pay the tick too, including backfill demands that bypass
+            // the empty-tail backoff, or persistent errors spin this loop.
+            if report.fetches_issued() == 0 || report.failures() > 0 {
                 tokio::select! {
                     () = tokio::time::sleep(self.tick) => {}
                     () = shutdown.cancelled() => return,

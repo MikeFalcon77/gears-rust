@@ -12,7 +12,7 @@
 //!
 //! Current streams attach partition-cache readers through the loader. Its bounded
 //! tail polling fills spans and wakes the session's local readiness notification.
-//! The retained DeliveryNotifier port is not called by this stream implementation;
+//! The retained `DeliveryNotifier` port is not called by this stream implementation;
 //! do not infer native Cluster prefix-watch delivery from that trait bound.
 
 use std::sync::Arc;
