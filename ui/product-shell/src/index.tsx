@@ -61,11 +61,11 @@ export function ProductShell(props: {
 }) {
   const { config, modules } = props;
   const ids = modules.flatMap((module) => module.pages.map((page) => page.id));
-  if (
+  if (config.authenticationMode !== "static-demo" && (
     !config.firebase?.apiKey ||
     !config.firebase?.projectId ||
     !config.firebase?.authDomain
-  )
+  ))
     return (
       <main className="sign-in">
         <h1>Product configuration unavailable</h1>
@@ -92,14 +92,17 @@ function ConfiguredShell({
   config: RuntimeConfig;
   modules: ReadonlyArray<GearUiPlugin>;
 }) {
-  const [user, setUser] = useState<User | null>(null),
+  const [user, setUser] = useState<Pick<User, "displayName" | "getIdToken"> | null>(null),
     [runtime, setRuntime] = useState<GearRuntime | null>(null),
     [status, setStatus] = useState("Checking your session…"),
     [error, setError] = useState(""),
     [toast, setToast] = useState("");
   const [pageId, setPageId] = useState(() => location.hash.slice(1));
   const generation = useRef(0);
-  const auth = useMemo(() => getAuth(initializeApp(config.firebase)), [config]);
+  const offline = config.authenticationMode === "static-demo";
+  const [offlineInput, setOfflineInput] = useState("");
+  const [offlineCredential, setOfflineCredential] = useState<string | null>(null);
+  const auth = useMemo(() => offline ? null : getAuth(initializeApp(config.firebase)), [config, offline]);
   const query = useMemo(
     () =>
       new QueryClient({
@@ -136,10 +139,7 @@ function ConfiguredShell({
     let unsubscribe = () => {},
       closed = false,
       session: AbortController | undefined;
-    setPersistence(auth, browserSessionPersistence)
-      .then(() => {
-        if (closed) return;
-        unsubscribe = onAuthStateChanged(auth, async (next) => {
+    const activate = async (next: Pick<User, "displayName" | "getIdToken"> | null) => {
           const current = ++generation.current;
           session?.abort();
           session = new AbortController();
@@ -163,6 +163,8 @@ function ConfiguredShell({
             const identity = await api.json<Identity>(config.identityPath);
             if (!identity.subject_id || !identity.tenant_id)
               throw Error("Invalid identity response");
+            if (offline && !Object.hasOwn(config.tenants, identity.tenant_id))
+              throw Error("Use a laboratory access token, not an operator credential.");
             if (closed || generation.current !== current) return;
             setRuntime({
               events: new EventFeed({
@@ -193,11 +195,19 @@ function ConfiguredShell({
               setStatus("Access could not be verified.");
             }
           }
-        });
-      })
-      .catch(() => {
+    };
+    if (offline) {
+      void activate(offlineCredential ? {
+        displayName: "Offline demo account",
+        getIdToken: async () => offlineCredential,
+      } : null);
+    } else if (auth) {
+      setPersistence(auth, browserSessionPersistence).then(() => {
+        if (!closed) unsubscribe = onAuthStateChanged(auth, activate);
+      }).catch(() => {
         if (!closed) setError("Authentication configuration is unavailable.");
       });
+    }
     return () => {
       closed = true;
       generation.current++;
@@ -206,10 +216,17 @@ function ConfiguredShell({
       void query.cancelQueries();
       query.clear();
     };
-  }, [auth, query, config]);
+  }, [auth, query, config, offline, offlineCredential]);
   const login = async () => {
     setError("");
     try {
+      if (offline) {
+        if (!/^[a-f0-9]{64}$/.test(offlineInput.trim())) throw Error("Enter the prepared laboratory access token.");
+        setOfflineCredential(offlineInput.trim());
+        setOfflineInput("");
+        return;
+      }
+      if (!auth) throw Error("Authentication configuration is unavailable.");
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       await signInWithPopup(auth, provider);
@@ -219,7 +236,8 @@ function ConfiguredShell({
   };
   const logout = async () => {
     setRuntime(null);
-    await signOut(auth);
+    setOfflineCredential(null);
+    if (auth) await signOut(auth);
   };
   if (modules.some((m) => m.apiVersion !== 1))
     return (
@@ -233,7 +251,7 @@ function ConfiguredShell({
         <div className="brand-mark">
           <Boxes size={30} />
         </div>
-        <p className="eyebrow">GEARBOX COMMUNITY DEMO</p>
+        <p className="eyebrow">{offline ? "OFFLINE DEMO · STATIC IDENTITIES" : "GEARBOX COMMUNITY DEMO"}</p>
         <h1>{config.productName}</h1>
         <p>{status}</p>
         {error && (
@@ -241,8 +259,12 @@ function ConfiguredShell({
             {error}
           </p>
         )}
+        {offline && !user && <label>Laboratory access token
+          <input type="password" autoComplete="off" value={offlineInput}
+            onChange={event => setOfflineInput(event.target.value)} />
+        </label>}
         <button onClick={() => void (user ? logout() : login())}>
-          {user ? "Sign out and try another account" : "Sign in with Google"}
+          {user ? "Sign out and try another account" : offline ? "Sign in to offline demo" : "Sign in with Google"}
           <ArrowUpRight size={17} />
         </button>
         <span className="security-note">
@@ -315,7 +337,7 @@ function ConfiguredShell({
                 </p>
                 <h1>{page?.title || "Welcome"}</h1>
               </div>
-              <span className="version-badge">Gears · Live product</span>
+              <span className="version-badge">{offline ? "Offline demo · Static identity" : "Gears · Live product"}</span>
             </div>
             <div className={widgets.length ? "content-layout" : ""}>
               <section>

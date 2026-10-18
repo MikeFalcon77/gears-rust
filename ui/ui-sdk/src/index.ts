@@ -11,6 +11,7 @@ export interface RuntimeConfig {
   apiBase: string;
   productName: string;
   firebase: Record<string, string>;
+  authenticationMode?: "firebase" | "static-demo";
   identityPath: string;
   tenants: Record<
     string,
