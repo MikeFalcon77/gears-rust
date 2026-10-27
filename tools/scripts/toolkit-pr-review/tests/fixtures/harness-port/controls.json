@@ -1,0 +1,142 @@
+{
+  "cases": {
+    "lost_context": "v1/head/src/entry.rs",
+    "explicit_transfer": "v1/head/src/entry.rs",
+    "conditional_auxiliary": "v3/head/src/egress.rs",
+    "security": "v1/head/src/ledger.rs",
+    "optional_test_gap": "v1/head/src/carrier.rs"
+  },
+  "files": [
+    {
+      "fixture": "v1/base/src/carrier.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/carrier.rs",
+      "sha256": "f4486b4876110d0050e2f68fd0bc65ebd93476a752fbe10fae38bf4e196491f9"
+    },
+    {
+      "fixture": "v1/base/src/delivery.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/delivery.rs",
+      "sha256": "ae57fa1913867ffa8a98bcdc1cfe3eb751269cadbf600caf6481cbc38a50ad41"
+    },
+    {
+      "fixture": "v1/base/src/entry.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/entry.rs",
+      "sha256": "36c6df8b95be30a62cf22c03a7ceecfc4e334577e996577fd900a0016b0bea4b"
+    },
+    {
+      "fixture": "v1/base/src/ledger.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/ledger.rs",
+      "sha256": "b5bdac8cdb005b315569ea9a042a1529c6dda9108c67a5a0ed7de8ec9ee18bdd"
+    },
+    {
+      "fixture": "v1/base/src/lib.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/lib.rs",
+      "sha256": "db5b92e97b90cd928dde96b4cf42c7c937850efcdf71f744032fdad480d45096"
+    },
+    {
+      "fixture": "v1/base/src/settings.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/settings.rs",
+      "sha256": "cde05615a7a4b4e68475a6d2c29337285e9252f5d5d59f3cedf82313b89cd5bc"
+    },
+    {
+      "fixture": "v1/base/src/transport.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/transport.rs",
+      "sha256": "39273a6c8a82830127ed9aac9333ea036fd6ba9f7ed569d0d6c41991627fc3e9"
+    },
+    {
+      "fixture": "v1/base/src/wire.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/base/src/wire.rs",
+      "sha256": "4b7984d55f5674f52b097a834fcaebeaca141ad297c38dd23f9cd407e585dff9"
+    },
+    {
+      "fixture": "v1/head/src/carrier.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/carrier.rs",
+      "sha256": "f4486b4876110d0050e2f68fd0bc65ebd93476a752fbe10fae38bf4e196491f9"
+    },
+    {
+      "fixture": "v1/head/src/delivery.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/delivery.rs",
+      "sha256": "67d3ceeea9ff30a9af1f150493451c5f6792d2ee576a07264d90f619a1d4f0e2"
+    },
+    {
+      "fixture": "v1/head/src/entry.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/entry.rs",
+      "sha256": "69790db09967ed822cc1cc3758226df559607a81065d266224b758c05611ea49"
+    },
+    {
+      "fixture": "v1/head/src/ledger.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/ledger.rs",
+      "sha256": "b5bdac8cdb005b315569ea9a042a1529c6dda9108c67a5a0ed7de8ec9ee18bdd"
+    },
+    {
+      "fixture": "v1/head/src/lib.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/lib.rs",
+      "sha256": "db5b92e97b90cd928dde96b4cf42c7c937850efcdf71f744032fdad480d45096"
+    },
+    {
+      "fixture": "v1/head/src/settings.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/settings.rs",
+      "sha256": "ee8e5c3b1a5bbc4a80139dba56ffb0f00ef7626849525dab9185ab3cb2858ce2"
+    },
+    {
+      "fixture": "v1/head/src/transport.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/transport.rs",
+      "sha256": "40c4a57dd91ea4844222ddc4fcf1ea86b4b7910ae3f31917a82af9ae29d0bdfd"
+    },
+    {
+      "fixture": "v1/head/src/wire.rs",
+      "source": "evals/boundary-evidence-v1/fixtures/head/src/wire.rs",
+      "sha256": "0e6569aee62d9336e6d457780f13d99ff46fde6cc1bf94f85389ba19b9883907"
+    },
+    {
+      "fixture": "v3/base/src/carrier.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/base/src/carrier.rs",
+      "sha256": "f4486b4876110d0050e2f68fd0bc65ebd93476a752fbe10fae38bf4e196491f9"
+    },
+    {
+      "fixture": "v3/base/src/egress.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/base/src/egress.rs",
+      "sha256": "95a04f761290b66f61cc0461ca705bb312d7bc404538aecd8470d1c7233ce727"
+    },
+    {
+      "fixture": "v3/base/src/entry.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/base/src/entry.rs",
+      "sha256": "bea536c7610edbaaa15316c79d77b8b21a80c7cb650788eb61915daefd214cbb"
+    },
+    {
+      "fixture": "v3/base/src/lib.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/base/src/lib.rs",
+      "sha256": "1257921dfe7a65cac2408bb22b590c4fdaf48a135de75f8d8691f9d7bfa83404"
+    },
+    {
+      "fixture": "v3/base/src/proxy.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/base/src/proxy.rs",
+      "sha256": "4c3b40c8f3f9e9538d1e31ffd1f41d1d798aae84f4949e46a8e488df4fb24526"
+    },
+    {
+      "fixture": "v3/head/src/carrier.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/head/src/carrier.rs",
+      "sha256": "f4486b4876110d0050e2f68fd0bc65ebd93476a752fbe10fae38bf4e196491f9"
+    },
+    {
+      "fixture": "v3/head/src/egress.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/head/src/egress.rs",
+      "sha256": "95a04f761290b66f61cc0461ca705bb312d7bc404538aecd8470d1c7233ce727"
+    },
+    {
+      "fixture": "v3/head/src/entry.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/head/src/entry.rs",
+      "sha256": "62adf4cf031069b4579b58399d13626fdd95577854e4688f8bca0c7b9e6bf882"
+    },
+    {
+      "fixture": "v3/head/src/lib.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/head/src/lib.rs",
+      "sha256": "1257921dfe7a65cac2408bb22b590c4fdaf48a135de75f8d8691f9d7bfa83404"
+    },
+    {
+      "fixture": "v3/head/src/proxy.rs",
+      "source": "evals/boundary-evidence-v3/fixtures/head/src/proxy.rs",
+      "sha256": "4c3b40c8f3f9e9538d1e31ffd1f41d1d798aae84f4949e46a8e488df4fb24526"
+    }
+  ],
+  "upstream_revision": "c6ac6f3fb2bfd35fcb27b6838e60a8835e47cdb5"
+}

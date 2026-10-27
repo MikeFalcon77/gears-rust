@@ -1,0 +1,153 @@
+{
+  "schema": "toolkit.paid-replay.v1",
+  "upstream_revision": "c6ac6f3fb2bfd35fcb27b6838e60a8835e47cdb5",
+  "source_sha256": {
+    "original-claims.json": "236fd781938db8e8cb69a0d79abb71fa9e603bab2c66f2c8e113ecff83083df1",
+    "source-members.json": "242ae6a919784133f03e63dece42fc3c756e5ddea0f1840cb51ed3794cb58997",
+    "findings.json": "df497f0a91fdb2c50ea6536b4d7a51c4b918ac7c82214748f40fd1468afd2c07"
+  },
+  "claims": [
+    {
+      "candidate_id": "design:0",
+      "evidence": "RequestBuilder::send (the only send path) now calls toolkit_trace_context::inject_request_id for every request built by any HttpClient. toolkit-http is also the transport for external calls: toolkit-auth OAuth2 token fetch / OIDC discovery (libs/toolkit-auth/src/oauth2/fetch.rs, source.rs:127), and the OAGW oauth2 client-credentials plugin, which runs inline in DataPlaneServiceImpl::proxy_request (service.rs:697 -> 1271 -> oauth2_client_cred_auth.rs:214) within the gateway's with_request_id scope. OAGW's upstream header policy defaults to PassthroughMode::None (headers.rs:28), yet the token request to the IdP now carries the inbound id. HttpClientConfig has no knob and no preset (token_endpoint(), proxy) disables it.",
+      "fix": "Make forwarding opt-in per client (e.g. an HttpClientConfig flag enabled by the toolkit-contract client/proxy presets), or perform the injection in toolkit-contract's send_unary/send_open_request where the builder is still in the caller task, leaving the generic RequestBuilder::send unchanged.",
+      "impact": "When such a fetch happens while serving a request, the edge id (kept verbatim when the client supplies one) is sent to external IdPs/vendors, a behavior change those clients did not opt into and cannot turn off; correlation ids are not credentials, so harm is limited to unintended header disclosure.",
+      "issue": "x-request-id injection is applied unconditionally to every toolkit-http client, including third-party/external clients, with no opt-out",
+      "line": 516,
+      "path": "libs/toolkit-http/src/request.rs",
+      "rule_id": "RUST-NO-007",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "subject": "line",
+      "kind": "defect"
+    },
+    {
+      "candidate_id": "design:1",
+      "evidence": "with_request_id docs say toolkit-http requests made while serving this request carry the id; inject_request_id only warns about Buffer. REQUEST_ID is a tokio task_local, which spawned tasks do not inherit. Production handlers spawn per-request work: mini-chat stream_message wraps start_stream in tokio::spawn (messages.rs:64) and reaches the in-process OAGW facade -> proxy_request -> OAuth2 fetch_token -> RequestBuilder::send, where current_request_id() returns None and no header is sent.",
+      "fix": "Document the spawn limitation next to the Buffer caveat and expose a helper (e.g. `request_id_scope()` capturing current_request_id() for `with_request_id` around spawned futures), then use it in spawn-to-completion patterns that issue outbound calls.",
+      "impact": "For spawned request work (mini-chat streaming turns, any handler using a spawn-to-completion pattern) the downstream hop silently lacks x-request-id, so the promised edge-id correlation is inconsistent across gears; diagnostic only.",
+      "issue": "with_request_id promises propagation for all toolkit-http calls made while serving the request, but the task-local is silently lost across tokio::spawn and no re-scoping helper exists",
+      "line": 277,
+      "path": "libs/toolkit-trace-context/src/lib.rs",
+      "rule_id": "RUST-OBS-001",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "subject": "line",
+      "kind": "defect"
+    },
+    {
+      "candidate_id": "async:0",
+      "evidence": "with_request_id uses REQUEST_ID.scope (lib.rs:281), and inject_request_id reads current_request_id() in the sending task (lib.rs:293, called from request.rs:516). Request handlers that hand work to a spawned task forward only the tracing Span, e.g. mini-chat run_to_completion `tokio::spawn(fut.instrument(tracing::Span::current()))` (messages.rs:64) and provider_task.rs:126. From there, toolkit-http sends do not carry x-request-id. Concrete path: in-process OAGW proxy_request -> OAuth2 plugin authenticate on a token-cache miss -> toolkit-auth fetch_token -> RequestBuilder::send. The doc comment says requests 'made while serving this request carry the same x-request-id' and does not mention the spawn boundary.",
+      "fix": "Document that the carrier does not cross tokio::spawn and that callers must re-scope it. Also provide a small helper (e.g. capture current_request_id() and wrap the spawned future in with_request_id) and use it where request work is spawned, such as mini-chat run_to_completion.",
+      "impact": "Precondition: a request handler issues toolkit-http calls from a spawned task, as mini-chat streaming does. Effect: those outbound calls omit x-request-id, so downstream logs cannot be correlated with the edge request. The loss is correlation/diagnostics only; no functional failure was established.",
+      "issue": "The x-request-id task-local carrier is silently lost across tokio::spawn, contrary to the with_request_id promise",
+      "line": 277,
+      "path": "libs/toolkit-trace-context/src/lib.rs",
+      "rule_id": "RUST-ASYNC-001",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "subject": "line",
+      "kind": "defect"
+    },
+    {
+      "candidate_id": "security:0",
+      "evidence": "SetRequestIdLayer (gear.rs:652) keeps an inbound x-request-id and mints one only when it is absent. push_req_id_to_extensions now scopes extract_request_id(req.headers()) via with_request_id (request_id.rs:28/35), with no length or charset allowlist. RequestBuilder::send calls inject_request_id on every request whatever the destination (request.rs:516). Concrete path: OAGW proxy_handler (proxy.rs:199) -> proxy_request -> execute_auth_plugin (service.rs:697) -> OAuth2 client-credentials fetch_token on a cache miss (oauth2_client_cred_auth.rs:214) -> OIDC discovery and token POST to the external IdP, which now carry the caller-chosen id. This bypasses OAGW's upstream header passthrough policy (service.rs:661).",
+      "fix": "Only propagate gateway-minted ids, or validate inbound ids against a bounded allowlist (e.g. the nanoid charset, <=64 chars) and replace invalid ones before scoping. Consider limiting inject_request_id to internal/contract-client destinations.",
+      "impact": "Hardening only: a correlation value chosen by an external caller reaches third-party IdP/token endpoints and internal gears unbounded. It is not a credential or tenant identity, so no sensitive disclosure is established.",
+      "issue": "Client-supplied x-request-id is now propagated unvalidated and unbounded to every outbound toolkit-http call, including third-party hosts",
+      "line": 28,
+      "path": "gears/system/api-gateway/src/middleware/request_id.rs",
+      "rule_id": "RUST-SEC-001",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "subject": "line",
+      "kind": "defect"
+    },
+    {
+      "candidate_id": "tests:0",
+      "evidence": "The mock matches only `when.method(Method::GET).path(\"/test\")`, so it accepts a request with or without x-request-id; the test then asserts status 200 and that the mock was hit. If RequestBuilder::send (request.rs:516) minted an id outside a scope, e.g. a nanoid fallback, the test would still pass, contradicting its doc comment 'the header stays absent'. The toolkit-trace-context unit test covers inject_request_id in isolation but not the send path in request.rs.",
+      "fix": "Constrain the mock with `.header_missing(\"x-request-id\")` (httpmock 0.8), so the status/`mock.assert_async()` checks fail if the header is sent.",
+      "impact": "A regression that makes background/startup toolkit-http calls invent request ids, polluting downstream correlation, would pass this test unnoticed.",
+      "issue": "test_request_id_absent_outside_scope never checks that x-request-id is absent",
+      "line": 705,
+      "path": "libs/toolkit-http/src/client.rs",
+      "rule_id": "TEST-QUALITY-4",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "subject": "line",
+      "kind": "coverage_gap"
+    },
+    {
+      "candidate_id": "tests:1",
+      "evidence": "push_req_id_to_extensions now returns `toolkit::api::with_request_id(Some(rid), next.run(req)).await`, making it the edge origin of cross-hop propagation for in-process handlers that call toolkit-http clients. Existing gateway tests (tests/request_id.rs, tests/middleware_order.rs, tests/access_log_tests.rs) assert only the XRequestId extension and the response header; none reads current_request_id() in a handler or checks an outbound toolkit-http request. Plausible wrong implementations, such as dropping the `return`, scoping only some branch, or reordering this layer outside SetRequestIdLayer so gateway-minted ids are never scoped, would pass every existing test. The OoP equivalent got such tests in oop_serve_tests.rs:697-771; the gateway did not.",
+      "fix": "Add a gateway test, e.g. in tests/request_id.rs, whose handler records toolkit::api::current_request_id() and asserts it equals both the supplied header and the SetRequestIdLayer-minted id when no header is sent.",
+      "impact": "If the edge install regresses, requests entering through the gateway and served by in-process handlers silently stop forwarding x-request-id to downstream gears via toolkit-http clients, so cross-gear log correlation, the feature this PR delivers, breaks with no failing test. Observability-only, but affects all such gateway traffic.",
+      "issue": "Gateway installation of the request-id task-local carrier is untested",
+      "line": 35,
+      "path": "gears/system/api-gateway/src/middleware/request_id.rs",
+      "rule_id": "RUST-TEST-001",
+      "severity": "MEDIUM",
+      "side": "RIGHT",
+      "subject": "line",
+      "kind": "coverage_gap"
+    }
+  ],
+  "merges": [
+    {
+      "candidate": "design:0",
+      "duplicate_of": "security:0",
+      "reason": "Same changed outbound flow and limited disclosure; retain validation and opt-in requirements"
+    },
+    {
+      "candidate": "design:1",
+      "duplicate_of": "async:0",
+      "reason": "Same spawned-task diagnostic loss; retain conditional OAuth2 cache-miss scope"
+    }
+  ],
+  "paid_comments": [
+    {
+      "body": "The gateway middleware now scopes the request-id task-local with with_request_id, but no gateway test checks it. Existing tests only assert the XRequestId extension and the response header. A regression such as dropping the `return`, scoping only one branch, or ordering this layer outside SetRequestIdLayer would pass all tests. In-process handlers would then silently stop forwarding x-request-id to downstream gears, which breaks cross-gear log correlation (observability only). Add a gateway test, e.g. in tests/request_id.rs, whose handler records toolkit::api::current_request_id(). It should match the supplied header, or the SetRequestIdLayer-minted id when no header is sent.",
+      "id": "RUST-TEST-001",
+      "line": 35,
+      "path": "gears/system/api-gateway/src/middleware/request_id.rs",
+      "severity": "MEDIUM",
+      "side": "RIGHT",
+      "stable_id": "786ef3b612b2ed3fa44cc6e9cbb73907d7184deb747c9f8bf574cc0a79ed888e",
+      "subject": "line",
+      "title": "Gateway installation of the request-id task-local carrier is untested"
+    },
+    {
+      "body": "toolkit-http now adds x-request-id to every request, whatever the destination, and a client-supplied id is kept verbatim with no length or charset check. While the gateway serves a request, an OAGW OAuth2 client-credentials token-cache miss sends this id to the external IdP discovery and token endpoints. This bypasses OAGW's default no-passthrough header policy, and clients cannot opt out. Ids are not credentials, so this is hardening against unintended header disclosure. Fix: propagate only gateway-minted ids, or validate inbound ids (e.g. nanoid charset, at most 64 chars). Also make forwarding opt-in per client (e.g. via toolkit-contract presets), or inject the id in toolkit-contract send paths instead.",
+      "id": "RUST-SEC-001",
+      "line": 28,
+      "path": "gears/system/api-gateway/src/middleware/request_id.rs",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "stable_id": "179fa28edd951b1982fd02e08e2b33a76d0522a9c65f539511ac11178852ecea",
+      "subject": "line",
+      "title": "Client-supplied x-request-id is now propagated unvalidated and unbounded to every outbound toolkit-http call, including third-party hosts"
+    },
+    {
+      "body": "test_request_id_absent_outside_scope does not check that x-request-id is absent. The mock matches only GET /test, so it accepts requests with or without the header. If RequestBuilder::send started minting an id outside a scope, e.g. a nanoid fallback, the test would still pass. Background or startup calls could then pollute downstream correlation unnoticed. Constrain the mock with `.header_missing(\"x-request-id\")` (httpmock 0.8), so the test fails whenever the header is sent outside a request-id scope.",
+      "id": "TEST-QUALITY-4",
+      "line": 705,
+      "path": "libs/toolkit-http/src/client.rs",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "stable_id": "7fe8745db61d51a2b6d7fb620d6dacd202084efc40dbf4b9501c023698242443",
+      "subject": "line",
+      "title": "test_request_id_absent_outside_scope never checks that x-request-id is absent"
+    },
+    {
+      "body": "The request-id carrier is a tokio task-local, so it is silently lost across tokio::spawn. However, the with_request_id docs promise that calls made while serving the request carry the id. When a handler makes toolkit-http calls from a spawned task, as mini-chat streaming does (e.g. OAGW OAuth2 fetch_token on a token-cache miss), those calls omit x-request-id. Downstream logs then cannot be correlated with the edge request (diagnostics only). Document this spawn limitation next to the Buffer caveat. Add a helper that captures current_request_id() and wraps spawned futures in with_request_id, and use it in spawn-to-completion paths such as mini-chat run_to_completion.",
+      "id": "RUST-ASYNC-001",
+      "line": 277,
+      "path": "libs/toolkit-trace-context/src/lib.rs",
+      "severity": "LOW",
+      "side": "RIGHT",
+      "stable_id": "8c75a25724bfeed20758ca8d36f6c462c1c30c50af23d9fd0941e5238466c16f",
+      "subject": "line",
+      "title": "The x-request-id task-local carrier is silently lost across tokio::spawn, contrary to the with_request_id promise"
+    }
+  ]
+}

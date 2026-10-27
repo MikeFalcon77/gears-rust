@@ -97,3 +97,18 @@ def agent_costs(corpus_tokens: int, diff_tokens: int) -> dict[str, int]:
 
 def total_cost(corpus_tokens: int, diff_tokens: int) -> int:
     return sum(agent_costs(corpus_tokens, diff_tokens).values())
+
+
+def pipeline_costs(corpus_tokens: int, diff_tokens: int) -> tuple[dict[str, int], int]:
+    """Two source passes per module, plus draft/receipt and post-processing input.
+
+    This is a planning estimate, not a cap on source exploration or a billing claim.
+    Closure may need unchanged consumers beyond this initial corpus.
+    """
+    policy = sum(_size(p) for p in (DOCS / "policies").glob("*.*"))
+    costs = {m: 2 * (n + est_tokens(policy)) + 8_000
+             for m, n in agent_costs(corpus_tokens, diff_tokens).items()}
+    # Architecture also needs targeted full-source context during closure.
+    costs["architecture"] += corpus_tokens
+    post = 3 * (est_tokens(policy) + 12_000)  # collect, history matching, format
+    return costs, post

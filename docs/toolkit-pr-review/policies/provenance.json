@@ -1,0 +1,37 @@
+{
+  "schema": "toolkit.harness-port-provenance.v1",
+  "repository": "https://github.com/modcrafter77/nonstop-reviewer",
+  "revision": "c6ac6f3fb2bfd35fcb27b6838e60a8835e47cdb5",
+  "policies": {
+    "harness": "boundary_evidence_v3",
+    "severity": "consequences_v1",
+    "collect": "shared_flow_v1"
+  },
+  "model": "inherit",
+  "context": "pinned Git base/head, no RAG service",
+  "sources": {
+    "skills/nonstop-review/policies/boundary-evidence-v3.json": "eecb05d31291aaa68d03dabc6cdacfb2796cc63caa81ff4ebbe6bdee60737c63",
+    "skills/nonstop-review/policies/severity-consequences-v1.md": "44800a45cdaf9f326718400508aceed6af187f1f81349437c7565e1a6909e4c7",
+    "crates/nonstop-executor/src/harness_policy.rs": "7356d1cebec832df19698663128f95c0cd9521fb60578bf0ef3774b4e19f6aca",
+    "crates/nonstop-executor/src/boundary_audit.rs": "1ddf3acbcbc87762014e36b25ea0d1d084dec2c7dfa9ee2b41950a5f5dc48156",
+    "crates/nonstop-executor/src/collect_decisions.rs": "16931213fdf5d9e98d64cf2d28ba4ec8612102a30f76915ba9bb93c02d23fa1b",
+    "crates/nonstop-executor/src/comment_format.rs": "beffc3d9ca7d3ebe86166736079f2ee7dd2154d692b1d6f7899cfbb8b1244b10"
+  },
+  "adapted_sha256": {
+    "boundary.md": "63f2afa59269e412280dbaa8a986354915f3863e4598e4edf4d9766e17a0414b",
+    "collect.md": "7fbc5457ec85cb83e7d0cc3ee52912f18792898a6dbcd7627a756bab9a05b168",
+    "format.md": "e3ece172dfc3977315d4df27d302cdeaae1e198ab3476087ed627808fae568c6",
+    "pass-contract.md": "c82e76c40f453135aa918ee55eab6150652690c13c2b3f95a4a98eda3c1c8b06",
+    "severity.md": "1b6d93fffa7d3fb6bf0da90bcd7ca8ba376d2141c140a96e1dc09374e66e8a6b"
+  },
+  "criteria_sha256": {
+    "docs/toolkit-pr-review/rules/async.md": "2d2176d2adc84d3e79458b85504695fc897adb4b2462db63679ea1d0b6ae5027",
+    "docs/toolkit-pr-review/rules/design.md": "bcad5f817aa2b2c4037584ea1fa3b7cad69df8a05c311a3f79b6a6d117211811",
+    "docs/toolkit-pr-review/rules/errors.md": "336f7772598722eb704a40f2ff671f4b49d6e5e75c812f58bd993c2df6e7e828",
+    "docs/toolkit-pr-review/rules/security.md": "c7e9a219f37553219e0d66f18e426cedf8fb04fbf0a7cefcedfa09e83b4bc772",
+    "docs/toolkit-pr-review/rules/tests.md": "ad7d1834988bf86ffe3f6f69a9ffea4de36d9cd1d82b53288131b98e9f02b8aa",
+    "docs/toolkit-pr-review/rules/toolkit.md": "3987af7176ebd926e05c17ffa2e915eed2df66cb3e46d14f206f486f9a474bea",
+    "docs/toolkit-pr-review/agents/architecture.md": "18dbbc13d0e99134a2c6681a5b3eb89ee88b59f80c03f5e90249f59441606b26"
+  },
+  "target_baseline": "0d73651247b7351521c8b65239cc77b5ed765818"
+}

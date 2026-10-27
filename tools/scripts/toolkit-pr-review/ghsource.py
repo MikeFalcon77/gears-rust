@@ -24,7 +24,7 @@ class SourceError(RuntimeError):
 
 
 def run(cmd: list[str], check: bool = True) -> str:
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if check and p.returncode != 0:
         raise SourceError(f"{' '.join(cmd[:3])}...: {p.stderr.strip()[:300]}")
     return p.stdout
@@ -109,7 +109,7 @@ def read_blob_api(repo: str, sha: str, path: str) -> bytes | None:
 
 
 def blob_size_git(sha: str, path: str) -> int | None:
-    p = subprocess.run(["git", "cat-file", "-s", f"{sha}:{path}"], capture_output=True, text=True)
+    p = subprocess.run(["git", "cat-file", "-s", f"{sha}:{path}"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if p.returncode != 0:
         return None
     try:
