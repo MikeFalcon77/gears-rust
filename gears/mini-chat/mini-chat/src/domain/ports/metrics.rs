@@ -83,6 +83,12 @@ pub trait MiniChatMetricsPort: Send + Sync {
     /// `{prefix}_finalization_latency_ms` — histogram
     fn record_finalization_latency_ms(&self, ms: f64);
 
+    /// `{prefix}_outbox_dead_total` — counter
+    /// Messages a handler dead-lettered. `queue`: `usage`; `reason`:
+    /// `invalid_payload`, `permanent`, `max_attempts`
+    /// (see [`metric_labels`](super::metric_labels)).
+    fn record_outbox_dead(&self, queue: &str, reason: &str);
+
     // ── P1: Quota Enforcement (6 metrics) ──────────────────────────────
 
     /// `{prefix}_quota_preflight_total` — counter
@@ -265,6 +271,7 @@ impl MiniChatMetricsPort for NoopMetrics {
     fn record_turn_mutation_latency_ms(&self, _: &str, _: f64) {}
     fn record_audit_emit(&self, _: &str) {}
     fn record_finalization_latency_ms(&self, _: f64) {}
+    fn record_outbox_dead(&self, _: &str, _: &str) {}
     fn record_quota_preflight(&self, _: &str, _: &str, _: &str) {}
     fn record_quota_reserve(&self, _: &str) {}
     fn record_quota_commit(&self, _: &str) {}

@@ -87,8 +87,8 @@ pub struct MiniChatMetricsMeter {
     #[allow(dead_code)]
     oagw_circuit_open: Counter<u64>,
 
-    // ── P2: Outbox (deferred: waiting for toolkit_db::outbox integration) ──
-    #[allow(dead_code)]
+    // ── P2: Outbox (`outbox_dead` is recorded by the usage handler; the
+    // rest are deferred: waiting for toolkit_db::outbox integration) ──
     outbox_dead: Counter<u64>,
     #[allow(dead_code)]
     outbox_pending_age_seconds: Histogram<f64>,
@@ -783,6 +783,16 @@ impl MiniChatMetricsPort for MiniChatMetricsMeter {
     fn record_audit_emit(&self, result: &str) {
         self.audit_emit
             .add(1, &[KeyValue::new(key::RESULT, result.to_owned())]);
+    }
+
+    fn record_outbox_dead(&self, queue: &str, reason: &str) {
+        self.outbox_dead.add(
+            1,
+            &[
+                KeyValue::new(key::QUEUE, queue.to_owned()),
+                KeyValue::new(key::REASON, reason.to_owned()),
+            ],
+        );
     }
 
     fn record_finalization_latency_ms(&self, ms: f64) {

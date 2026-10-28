@@ -6761,6 +6761,7 @@ mod tests {
         fn record_finalization_latency_ms(&self, _: f64) {
             self.finalization_latency_ms.fetch_add(1, Ordering::Relaxed);
         }
+        fn record_outbox_dead(&self, _: &str, _: &str) {}
         fn record_quota_preflight(&self, _: &str, _: &str, _: &str) {
             self.quota_preflight.fetch_add(1, Ordering::Relaxed);
         }

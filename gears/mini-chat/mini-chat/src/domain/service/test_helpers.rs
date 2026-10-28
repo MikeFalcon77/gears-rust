@@ -1309,6 +1309,8 @@ pub struct TestMetrics {
     /// `result` label of every `record_background_indexing` call, in order.
     pub background_indexing: Mutex<Vec<String>>,
     pub finalization_latency_ms: AtomicU64,
+    /// `(queue, reason)` of every `record_outbox_dead` call, in order.
+    pub outbox_dead: Mutex<Vec<(String, String)>>,
     pub quota_commit: AtomicU64,
     pub quota_overshoot: AtomicU64,
     /// Every `record_quota_overshoot_uncharged_tokens` value, in order.
@@ -1333,6 +1335,7 @@ impl TestMetrics {
             audit_emit_results: Mutex::new(Vec::new()),
             background_indexing: Mutex::new(Vec::new()),
             finalization_latency_ms: AtomicU64::new(0),
+            outbox_dead: Mutex::new(Vec::new()),
             quota_commit: AtomicU64::new(0),
             quota_overshoot: AtomicU64::new(0),
             quota_overshoot_uncharged_tokens: Mutex::new(Vec::new()),
@@ -1373,6 +1376,12 @@ impl crate::domain::ports::MiniChatMetricsPort for TestMetrics {
     }
     fn record_finalization_latency_ms(&self, _: f64) {
         self.finalization_latency_ms.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_outbox_dead(&self, queue: &str, reason: &str) {
+        self.outbox_dead
+            .lock()
+            .unwrap()
+            .push((queue.to_owned(), reason.to_owned()));
     }
     fn record_quota_preflight(&self, _: &str, _: &str, _: &str) {}
     fn record_quota_reserve(&self, _: &str) {}
