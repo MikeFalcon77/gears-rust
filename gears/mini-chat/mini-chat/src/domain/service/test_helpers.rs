@@ -1312,6 +1312,8 @@ pub struct TestMetrics {
     pub quota_commit: AtomicU64,
     pub quota_overshoot: AtomicU64,
     pub quota_actual_tokens: AtomicU64,
+    /// `model` label of every `record_quota_usage_missing` call, in order.
+    pub quota_usage_missing: Mutex<Vec<String>>,
     pub streams_aborted: AtomicU64,
     pub attachment_upload: AtomicU64,
     pub attachment_upload_bytes: AtomicU64,
@@ -1332,6 +1334,7 @@ impl TestMetrics {
             quota_commit: AtomicU64::new(0),
             quota_overshoot: AtomicU64::new(0),
             quota_actual_tokens: AtomicU64::new(0),
+            quota_usage_missing: Mutex::new(Vec::new()),
             streams_aborted: AtomicU64::new(0),
             attachment_upload: AtomicU64::new(0),
             attachment_upload_bytes: AtomicU64::new(0),
@@ -1379,6 +1382,12 @@ impl crate::domain::ports::MiniChatMetricsPort for TestMetrics {
     fn record_quota_estimated_tokens(&self, _: f64) {}
     fn record_quota_actual_tokens(&self, _: f64) {
         self.quota_actual_tokens.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_quota_usage_missing(&self, model: &str) {
+        self.quota_usage_missing
+            .lock()
+            .unwrap()
+            .push(model.to_owned());
     }
     fn record_stream_incomplete(&self, _: &str, _: &str, _: &str) {}
     fn record_cancel_requested(&self, _: &str) {}

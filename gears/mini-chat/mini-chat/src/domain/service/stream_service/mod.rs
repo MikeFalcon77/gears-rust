@@ -6550,6 +6550,7 @@ mod tests {
             self.quota_estimated_tokens.fetch_add(1, Ordering::Relaxed);
         }
         fn record_quota_actual_tokens(&self, _: f64) {}
+        fn record_quota_usage_missing(&self, _: &str) {}
         fn record_stream_incomplete(&self, _: &str, _: &str, _: &str) {
             self.stream_incomplete.fetch_add(1, Ordering::Relaxed);
         }

@@ -44,6 +44,7 @@ pub struct MiniChatMetricsMeter {
     quota_overshoot: Counter<u64>,
     quota_estimated_tokens: Histogram<f64>,
     quota_actual_tokens: Histogram<f64>,
+    quota_usage_missing: Counter<u64>,
 
     // ── P1: Streaming Incomplete ───────────────────────────────────────
     stream_incomplete: Counter<u64>,
@@ -305,6 +306,12 @@ impl MiniChatMetricsMeter {
             quota_actual_tokens: meter
                 .f64_histogram(format!("{prefix}_quota_actual_tokens"))
                 .with_description("Actual token count at settlement")
+                .build(),
+            quota_usage_missing: meter
+                .u64_counter(format!("{prefix}_quota_usage_missing"))
+                .with_description(
+                    "Completed turns settled estimated: provider reported zero or no usage",
+                )
                 .build(),
 
             // ── P1: Stream Incomplete ──────────────────────────────────
@@ -809,6 +816,11 @@ impl MiniChatMetricsPort for MiniChatMetricsMeter {
 
     fn record_quota_actual_tokens(&self, tokens: f64) {
         self.quota_actual_tokens.record(tokens, &[]);
+    }
+
+    fn record_quota_usage_missing(&self, model: &str) {
+        self.quota_usage_missing
+            .add(1, &[KeyValue::new(key::MODEL, model.to_owned())]);
     }
 
     // ── P1: Stream Incomplete ──────────────────────────────────────────

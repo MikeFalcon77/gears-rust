@@ -103,6 +103,11 @@ pub trait MiniChatMetricsPort: Send + Sync {
     /// `{prefix}_quota_actual_tokens` — histogram
     fn record_quota_actual_tokens(&self, tokens: f64);
 
+    /// `{prefix}_quota_usage_missing_total` — counter
+    /// Completed turns settled with the estimated formula because the
+    /// provider reported zero or no usage.
+    fn record_quota_usage_missing(&self, model: &str);
+
     // ── P1: Streaming Incomplete (1 metric) ────────────────────────────
 
     /// `{prefix}_stream_incomplete_total` — counter
@@ -261,6 +266,7 @@ impl MiniChatMetricsPort for NoopMetrics {
     fn record_quota_overshoot(&self, _: &str) {}
     fn record_quota_estimated_tokens(&self, _: f64) {}
     fn record_quota_actual_tokens(&self, _: f64) {}
+    fn record_quota_usage_missing(&self, _: &str) {}
     fn record_stream_incomplete(&self, _: &str, _: &str, _: &str) {}
     fn record_cancel_requested(&self, _: &str) {}
     fn record_cancel_effective(&self, _: &str) {}

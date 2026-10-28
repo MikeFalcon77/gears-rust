@@ -3779,6 +3779,7 @@ The gear records metrics with an OpenTelemetry meter. ToolKit exports metrics ov
 | Attachments | `mini_chat_attachment_background_indexing` | counter | `result`: `ready` \| `failed` \| `timeout` \| `set_ready_failed`. Outcome of the background indexing task for a document returned as `uploaded`; the upload itself was already counted in `mini_chat_attachment_upload{result="ok"}` |
 | Quota | `mini_chat_quota_preflight` | counter | `decision`, `model`, `tier` |
 | Quota | `mini_chat_quota_reserve`, `mini_chat_quota_commit`, `mini_chat_quota_overshoot` | counter | `period`. `quota_commit` is recorded only for actual settlements; `quota_overshoot` for actual settlements whose actual tokens exceed the reserve |
+| Quota | `mini_chat_quota_usage_missing` | counter | `model`. A completed turn whose provider reported zero or no usage; it settles estimated instead of free |
 | Quota | `mini_chat_quota_estimated_tokens`, `mini_chat_quota_actual_tokens` | histogram | — (`quota_estimated_tokens` records the turn's `reserve_tokens` = estimated input + `max_output_tokens_applied` after an allow/downgrade preflight, before the reserve is written, so a request rejected later still records it; `quota_actual_tokens` only for actual settlements) |
 | Tools | `mini_chat_code_interpreter_calls` | counter | `model` (incremented by the number of calls; recorded only for actual settlements, so estimated and orphan settlements are not counted) |
 | Knowledge search | `mini_chat_knowledge_search` | counter | `result`: `ok` \| `error` |
@@ -4702,7 +4703,7 @@ The following terms are used throughout sections 5.4–5.9:
 >
 > **P2 Enhancement Option**: Add `chat_turns.provider_request_started_at TIMESTAMPTZ` column for exact crash recovery if operational metrics show meaningful impact.
 
-- **Usage known**: the provider returned actual token counts (`usage.input_tokens`, `usage.output_tokens`) — either via a terminal `response.completed` / `response.incomplete` event or via error metadata. Settlement uses `settlement_method = "actual"`. A `completed` turn (including a provider `incomplete` response) always settles on the actual path with the usage it received: when the provider reported zero or no usage, the turn is charged 0 credits. The "at least one non-zero field" rule below applies only to failed turns; cancelled turns carry no usage and always settle estimated.
+- **Usage known**: the provider returned actual token counts (`usage.input_tokens`, `usage.output_tokens`) — either via a terminal `response.completed` / `response.incomplete` event or via error metadata. Settlement uses `settlement_method = "actual"`. Usage is known only when at least one of `input_tokens`, `output_tokens` is non-zero, for completed and failed turns alike. A `completed` turn (including a provider `incomplete` response) whose provider reported zero or no usage settles on the estimated path, logs a warning and increments `mini_chat_quota_usage_missing_total{model}`; it is never charged 0 credits. Cancelled turns carry no usage and always settle estimated.
 
 > **Canonical provider usage fields (normative)**: the authoritative usage metadata is read from the provider's terminal response event. The canonical field names are `usage.input_tokens` (integer, non-negative) and `usage.output_tokens` (integer, non-negative). OAGW passes provider responses through unchanged. If a provider uses different field names (e.g., `prompt_tokens`, `completion_tokens`), the Mini-Chat provider adapter normalizes them to the internal usage type (`input_tokens`, `output_tokens`, cache and reasoning counts) ([ADR-0005](./ADR/0005-cpt-cf-mini-chat-adr-multi-provider-adapters.md)). If `usage` object is present but either field is missing, treat the missing field as `0`. If the `usage` object is absent entirely, usage is "unknown" (estimated settlement path).
 
@@ -5792,7 +5793,7 @@ A turn MUST NOT transition to `completed` unless the full assistant message cont
 
 **1) completed** (normal `done`):
 
-- Settle using actual provider usage (`response.usage.input_tokens` + `response.usage.output_tokens`).
+- Settle using actual provider usage (`response.usage.input_tokens` + `response.usage.output_tokens`). If the provider reported zero or no usage, settle with the estimated formula instead (section 5.8) and emit `settlement_method = "estimated"`.
 - Release unused reserve, commit actual usage to `quota_usage` bucket rows (bucket `total` always; bucket `tier:premium` if premium turn).
 - If actual exceeds estimate (overshoot), commit the overshoot; never retroactively cancel a completed response.
 - If the provider returns terminal `response.incomplete` (e.g. due to `max_tokens`), the turn is still treated as `completed` (assistant message persisted, settle on actual usage). The incomplete reason is a **non-fatal completion signal**: it is logged and used as the `reason` label of `mini_chat_stream_incomplete_total`, and it MUST NOT be written to `chat_turns.error_code`. It is not included in the audit or outbox payload.
@@ -5833,7 +5834,7 @@ Three subcases:
 
 **3) aborted** (client disconnect / pod crash / orphan watchdog):
 
-- An aborted turn always settles `estimated`: the cancel path finalizes without usage, and the orphan watchdog has no usage either. For failed turns, **"usage known" requires a `usage` object with at least one non-zero field** (`input_tokens > 0` OR `output_tokens > 0`); a `usage` object present with both fields equal to zero (or missing) is treated as "usage unknown" and MUST follow the estimated path — not the actual path. A completed turn is not subject to this rule (it always settles actual). This prevents zero-charge exploitation: the no-free-cancel rule (§5.4 Settlement Definitions) mandates a non-zero debit whenever the provider request started; the estimated path enforces this via `minimal_generation_floor_applied`.
+- An aborted turn always settles `estimated`: the cancel path finalizes without usage, and the orphan watchdog has no usage either. For completed and failed turns, **"usage known" requires a `usage` object with at least one non-zero field** (`input_tokens > 0` OR `output_tokens > 0`); a `usage` object present with both fields equal to zero (or missing) is treated as "usage unknown" and MUST follow the estimated path — not the actual path. This prevents zero-charge exploitation: the no-free-cancel rule (§5.4 Settlement Definitions) mandates a non-zero debit whenever the provider request started; the estimated path enforces this via `minimal_generation_floor_applied`.
 - Settle using the deterministic charged token formula: `charged_tokens = min(reserve_tokens, estimated_input_tokens + minimal_generation_floor_applied)` where `minimal_generation_floor_applied` is read from `chat_turns.minimal_generation_floor_applied` (persisted at preflight from MiniChat ConfigMap, immutable after insert), consistent with the cancel/disconnect rule (see section 3.2) and the aborted-stream reconciliation (section 5.8).
 - Emit the outbox message with `billing_outcome = "aborted"`, `settlement_method = "estimated"`.
 
@@ -5895,6 +5896,8 @@ stateDiagram-v2
     note right of COMPLETED
         Outbox billing_outcome: "completed"
         Settlement method: "actual"
+        ("estimated" if the provider reported
+        zero or no usage)
         Charge: credits_micro(
           actual_input_tokens,
           actual_output_tokens,
@@ -5983,7 +5986,7 @@ The orphan watchdog demonstrates this separation:
 
 | Internal Terminal Condition | Billing Outcome | Outbox `billing_outcome` | Outbox `settlement_method` | Notes |
 |------------------------------|-----------------|------------------|---------------------------|-------|
-| `state = 'completed'` | `COMPLETED` | `"completed"` | `"actual"` | Normal success. Always actual, even when the provider reported zero or no usage (then 0 credits are charged) |
+| `state = 'completed'` | `COMPLETED` | `"completed"` | `"actual"` OR `"estimated"` (if the provider reported zero or no usage) | Normal success. A completed turn without usage is never free: it settles with the estimated formula and increments `mini_chat_quota_usage_missing_total{model}` |
 | `state = 'failed'` AND `error_code IN ('provider_error', 'provider_timeout', 'rate_limited')` | `FAILED` | `"failed"` | `"actual"` (if provider reported partial usage) OR `"estimated"` (if no usage available) | Provider terminal error after streaming started |
 | `state = 'failed'` AND `error_code IN ('web_search_calls_exceeded', 'code_interpreter_calls_exceeded', 'agentic_iterations_exceeded', 'unexpected_tool_use', 'message_persistence_failed')` | `FAILED` | `"failed"` | `"actual"` (if provider reported partial usage) OR `"estimated"` (if no usage available) | Per-turn tool call limit breached mid-turn; turn was post-provider-start; mirrors `provider_error` settlement. MUST NOT use `"released"` even if partial usage is unavailable — the provider was already called. |
 | `state = 'failed'` AND `error_code IN ('context_length_exceeded', 'validation_error', 'input_too_long', 'turn_setup_failed')` | `FAILED` | `"failed"` | `"released"` | Pre-provider failure; zero charge. For retry/edit setup failures no reserve exists yet and no settlement runs (unstarted retry/edit turn, section 5.7). |
