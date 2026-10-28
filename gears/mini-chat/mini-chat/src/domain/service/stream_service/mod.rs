@@ -6771,6 +6771,7 @@ mod tests {
             self.quota_commit.fetch_add(1, Ordering::Relaxed);
         }
         fn record_quota_overshoot(&self, _: &str) {}
+        fn record_quota_overshoot_uncharged_tokens(&self, _: f64) {}
         fn record_quota_estimated_tokens(&self, _: f64) {
             self.quota_estimated_tokens.fetch_add(1, Ordering::Relaxed);
         }

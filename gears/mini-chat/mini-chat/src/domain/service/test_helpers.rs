@@ -1311,6 +1311,8 @@ pub struct TestMetrics {
     pub finalization_latency_ms: AtomicU64,
     pub quota_commit: AtomicU64,
     pub quota_overshoot: AtomicU64,
+    /// Every `record_quota_overshoot_uncharged_tokens` value, in order.
+    pub quota_overshoot_uncharged_tokens: Mutex<Vec<f64>>,
     pub quota_actual_tokens: AtomicU64,
     /// `model` label of every `record_quota_usage_missing` call, in order.
     pub quota_usage_missing: Mutex<Vec<String>>,
@@ -1333,6 +1335,7 @@ impl TestMetrics {
             finalization_latency_ms: AtomicU64::new(0),
             quota_commit: AtomicU64::new(0),
             quota_overshoot: AtomicU64::new(0),
+            quota_overshoot_uncharged_tokens: Mutex::new(Vec::new()),
             quota_actual_tokens: AtomicU64::new(0),
             quota_usage_missing: Mutex::new(Vec::new()),
             streams_aborted: AtomicU64::new(0),
@@ -1378,6 +1381,12 @@ impl crate::domain::ports::MiniChatMetricsPort for TestMetrics {
     }
     fn record_quota_overshoot(&self, _: &str) {
         self.quota_overshoot.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_quota_overshoot_uncharged_tokens(&self, tokens: f64) {
+        self.quota_overshoot_uncharged_tokens
+            .lock()
+            .unwrap()
+            .push(tokens);
     }
     fn record_quota_estimated_tokens(&self, _: f64) {}
     fn record_quota_actual_tokens(&self, _: f64) {

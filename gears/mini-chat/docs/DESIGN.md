@@ -981,7 +981,7 @@ The Turn Status API `state: "error"` maps to internal `chat_turns.state = 'faile
 - When actual usage exceeds overshoot tolerance (actual/reserve > `quota.overshoot_tolerance_factor`), the turn remains in `state: "done"` (internal `chat_turns.state = completed`)
 - Billing is capped at reserved credits, but the completed response is delivered to the user
 - The "completed remains completed" rule (see Reserve Overshoot Reconciliation Rule, section 5.8.1) is absolute: a COMPLETED turn MUST remain COMPLETED regardless of overshoot magnitude
-- It does NOT result in `state: "error"` or any error_code visible to the client. P1 has no dedicated metric or log for the capped case: `mini_chat_quota_overshoot_total{period}` counts every actual settlement (completed, or failed with provider usage) whose actual tokens exceed the reserve, whether or not the tolerance was exceeded (`mini_chat_quota_overshoot_exceeded_total` is not defined)
+- It does NOT result in `state: "error"` or any error_code visible to the client. `mini_chat_quota_overshoot_total{period}` counts every actual settlement (completed, or failed with provider usage) whose actual tokens exceed the reserve, whether or not the tolerance was exceeded; the capped case alone is recorded in the `mini_chat_quota_overshoot_uncharged_tokens` histogram (`actual_tokens - reserve_tokens`, the tokens left unbilled)
 
 The Turn Status API deliberately hides billing outcomes to keep the client contract simple. Billing settlement details (outcome, settlement method, charged credits) are internal to the system and NOT exposed via this endpoint.
 
@@ -3779,6 +3779,7 @@ The gear records metrics with an OpenTelemetry meter. ToolKit exports metrics ov
 | Attachments | `mini_chat_attachment_background_indexing` | counter | `result`: `ready` \| `failed` \| `timeout` \| `set_ready_failed`. Outcome of the background indexing task for a document returned as `uploaded`; the upload itself was already counted in `mini_chat_attachment_upload{result="ok"}` |
 | Quota | `mini_chat_quota_preflight` | counter | `decision`, `model`, `tier` |
 | Quota | `mini_chat_quota_reserve`, `mini_chat_quota_commit`, `mini_chat_quota_overshoot` | counter | `period`. `quota_commit` is recorded only for actual settlements; `quota_overshoot` for actual settlements whose actual tokens exceed the reserve |
+| Quota | `mini_chat_quota_overshoot_uncharged_tokens` | histogram | — (`actual_tokens - reserve_tokens` of an actual settlement whose overshoot exceeded `quota.overshoot_tolerance_factor` and was capped at the reserve; recorded after commit) |
 | Quota | `mini_chat_quota_usage_missing` | counter | `model`. A completed turn whose provider reported zero or no usage; it settles estimated instead of free |
 | Quota | `mini_chat_quota_estimated_tokens`, `mini_chat_quota_actual_tokens` | histogram | — (`quota_estimated_tokens` records the turn's `reserve_tokens` = estimated input + `max_output_tokens_applied` after an allow/downgrade preflight, before the reserve is written, so a request rejected later still records it; `quota_actual_tokens` only for actual settlements) |
 | Tools | `mini_chat_code_interpreter_calls` | counter | `model` (incremented by the number of calls; recorded only for actual settlements, so estimated and orphan settlements are not counted) |
@@ -5001,9 +5002,10 @@ In the normal scheme you should not exceed limits, because:
            committed_tokens = reserve_tokens
            committed_credits_micro = reserved_credits_micro
 
-           // Target (not implemented in P1): a dedicated metric and error log for
-           // the capped case. P1 records only mini_chat_quota_overshoot_total{period}
-           // and sets an internal overshoot_capped flag on the settlement result (not exported).
+           // The settlement result carries overshoot_capped = true (not exported in
+           // events). After commit, finalization records
+           // mini_chat_quota_overshoot_uncharged_tokens = actual_tokens - reserve_tokens.
+           // No log line is emitted for the capped case.
    ```
 
    **Type specifications (normative):**
@@ -5024,9 +5026,9 @@ In the normal scheme you should not exceed limits, because:
 
    **Monitoring**:
    - If `mini_chat_quota_overshoot_total` (incremented once per period, `daily` and `monthly`, for each actual settlement with actual tokens > reserve) exceeds 5% of completed turns, operators SHOULD review estimation budgets (image_token_budget, tool_surcharge_tokens, web_search_surcharge_tokens, safety_margin_pct) and consider increasing conservative margins.
-   - Overshoot beyond tolerance (billing capped at reserve) indicates a severe estimation failure. P1 has no series that isolates it; `mini_chat_quota_overshoot_exceeded_total` is not defined.
+   - Overshoot beyond tolerance (billing capped at reserve) indicates a severe estimation failure. `mini_chat_quota_overshoot_uncharged_tokens` isolates it: its count is the number of capped settlements and its sum the tokens left unbilled. `mini_chat_quota_overshoot_exceeded_total` is not defined.
 
-   **Invariant (P1 normative)**: A COMPLETED turn MUST remain COMPLETED regardless of overshoot magnitude. The "never retroactively cancel a completed response" principle is absolute. Overshoot beyond tolerance caps billing at reserve_tokens but does NOT change turn state to FAILED or prevent response delivery. In P1 the cap is silent: no log line or dedicated metric is emitted (the `overshoot_capped` flag on the settlement result is not used).
+   **Invariant (P1 normative)**: A COMPLETED turn MUST remain COMPLETED regardless of overshoot magnitude. The "never retroactively cancel a completed response" principle is absolute. Overshoot beyond tolerance caps billing at reserve_tokens but does NOT change turn state to FAILED or prevent response delivery. The cap emits no log line; it is visible only in `mini_chat_quota_overshoot_uncharged_tokens`.
 
    #### Actual vs Committed Usage (Normative)
 

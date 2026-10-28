@@ -97,6 +97,11 @@ pub trait MiniChatMetricsPort: Send + Sync {
     /// `{prefix}_quota_overshoot_total` — counter
     fn record_quota_overshoot(&self, period: &str);
 
+    /// `{prefix}_quota_overshoot_uncharged_tokens` — histogram
+    /// `actual - reserve` tokens of an actual settlement whose overshoot
+    /// exceeded the tolerance and was capped at the reserve.
+    fn record_quota_overshoot_uncharged_tokens(&self, tokens: f64);
+
     /// `{prefix}_quota_estimated_tokens` — histogram
     fn record_quota_estimated_tokens(&self, tokens: f64);
 
@@ -264,6 +269,7 @@ impl MiniChatMetricsPort for NoopMetrics {
     fn record_quota_reserve(&self, _: &str) {}
     fn record_quota_commit(&self, _: &str) {}
     fn record_quota_overshoot(&self, _: &str) {}
+    fn record_quota_overshoot_uncharged_tokens(&self, _: f64) {}
     fn record_quota_estimated_tokens(&self, _: f64) {}
     fn record_quota_actual_tokens(&self, _: f64) {}
     fn record_quota_usage_missing(&self, _: &str) {}

@@ -42,6 +42,7 @@ pub struct MiniChatMetricsMeter {
     quota_reserve: Counter<u64>,
     quota_commit: Counter<u64>,
     quota_overshoot: Counter<u64>,
+    quota_overshoot_uncharged_tokens: Histogram<f64>,
     quota_estimated_tokens: Histogram<f64>,
     quota_actual_tokens: Histogram<f64>,
     quota_usage_missing: Counter<u64>,
@@ -298,6 +299,12 @@ impl MiniChatMetricsMeter {
             quota_overshoot: meter
                 .u64_counter(format!("{prefix}_quota_overshoot"))
                 .with_description("Quota overshoots (actual > reserved)")
+                .build(),
+            quota_overshoot_uncharged_tokens: meter
+                .f64_histogram(format!("{prefix}_quota_overshoot_uncharged_tokens"))
+                .with_description(
+                    "Tokens over the reserve left unbilled when an overshoot is capped",
+                )
                 .build(),
             quota_estimated_tokens: meter
                 .f64_histogram(format!("{prefix}_quota_estimated_tokens"))
@@ -808,6 +815,10 @@ impl MiniChatMetricsPort for MiniChatMetricsMeter {
     fn record_quota_overshoot(&self, period: &str) {
         self.quota_overshoot
             .add(1, &[KeyValue::new(key::PERIOD, period.to_owned())]);
+    }
+
+    fn record_quota_overshoot_uncharged_tokens(&self, tokens: f64) {
+        self.quota_overshoot_uncharged_tokens.record(tokens, &[]);
     }
 
     fn record_quota_estimated_tokens(&self, tokens: f64) {
