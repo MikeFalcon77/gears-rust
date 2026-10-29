@@ -1000,7 +1000,7 @@ pub async fn get_history(
     // target's chain from the reader. A definition record has no tenant, so
     // its actor is on no path.
     let reader = Reader::new(ctx.subject_tenant_id(), root);
-    let target_chain = resolver.chain_of(target.tenant_id(root)).await?;
+    let target_chain = target_chain(&resolver, reader, target.tenant_id(root)).await?;
     let to_target = reader.path_in(&target_chain);
     // @cpt-end:cpt-cf-settings-service-flow-audit-store-history:p1:inst-as-hist-10
     let mut items: Vec<AuditRecordDto> = page
