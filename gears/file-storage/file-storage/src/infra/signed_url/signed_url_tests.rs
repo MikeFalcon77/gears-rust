@@ -27,43 +27,16 @@ fn now() -> OffsetDateTime {
 }
 
 #[test]
-fn ed25519_provider_matches_rfc8032_test_vector() {
-    // RFC 8032 §7.1, TEST 1: fixed bytes keep existing keys and signatures compatible
-    // when the crypto backend changes. https://www.rfc-editor.org/rfc/rfc8032#section-7.1
-    let seed = hex::decode(concat!(
-        "9d61b19deffd5a60ba844af492ec2cc4",
-        "4449c5697b326919703bac031cae7f60",
-    ))
-    .unwrap();
-    let public_key = hex::decode(concat!(
-        "d75a980182b10ab7d54bfed3c964073a",
-        "0ee172f3daa62325af021a68f707511a",
-    ))
-    .unwrap();
-    let signature = hex::decode(concat!(
-        "e5564300c360ac729086e2cc806e828a",
-        "84877f1eb8e5d974d873e06522490155",
-        "5fb8821590a33bacc61e39701cf9b46b",
-        "d25bf5f0595bbe24655141438e7a100b",
-    ))
-    .unwrap();
-
-    let provider = Ed25519Provider::from_seed(&seed).unwrap();
-    assert_eq!(provider.public_key(), public_key);
-    assert_eq!(provider.sign(b""), signature);
-
-    let verifier = super::provider::Ed25519Verifier::new(public_key);
-    verifier.verify(b"", &signature).unwrap();
-    assert!(verifier.verify(b"changed", &signature).is_err());
-}
-
-#[test]
-fn ed25519_provider_rejects_invalid_seed_lengths() {
-    for len in [0, 31, 33, 64] {
-        assert!(
-            Ed25519Provider::from_seed(&vec![0; len]).is_err(),
-            "a seed of {len} bytes must be rejected"
-        );
+fn configured_pkcs8_key_is_stable_and_old_seeds_are_rejected() {
+    let key = toolkit_security::crypto::signature::EcdsaP256KeyPair::generate_pkcs8().unwrap();
+    let a = EcdsaP256Provider::from_pkcs8(&key).unwrap();
+    let b = EcdsaP256Provider::from_pkcs8(&key).unwrap();
+    assert_eq!(a.public_key(), b.public_key());
+    let signature = a.sign(b"signed URL").unwrap();
+    b.verifier().verify(b"signed URL", &signature).unwrap();
+    assert!(b.verifier().verify(b"changed", &signature).is_err());
+    for len in [0, 31, 32, 33, 64] {
+        assert!(EcdsaP256Provider::from_pkcs8(&vec![0; len]).is_err());
     }
 }
 
@@ -125,9 +98,12 @@ fn expiry_is_exclusive_at_the_boundary() {
 
 #[test]
 fn rejects_malformed_public_key() {
-    assert!(Verifier::from_public_key(vec![0u8; 31]).is_err());
-    assert!(Verifier::from_public_key(vec![0u8; 33]).is_err());
-    assert!(Verifier::from_public_key(vec![0u8; 32]).is_ok());
+    assert!(Verifier::from_public_key(&[0u8; 31]).is_err());
+    assert!(Verifier::from_public_key(&[0u8; 33]).is_err());
+    assert!(Verifier::from_public_key(&[0u8; 32]).is_err());
+    assert!(Verifier::from_public_key(&[0u8; 65]).is_err());
+    let issuer = Issuer::generate(3600).unwrap();
+    assert!(Verifier::from_public_key(&issuer.public_key()).is_ok());
 }
 
 #[test]
@@ -167,7 +143,7 @@ fn malformed_token_is_rejected() {
 fn issuer_over_explicit_provider_round_trips() {
     // The codec goes through the `SignatureProvider` seam, so an explicitly supplied provider
     // behaves identically.
-    let provider = Arc::new(Ed25519Provider::generate().unwrap());
+    let provider = Arc::new(EcdsaP256Provider::generate().unwrap());
     let issuer = Issuer::with_provider(provider, 3600);
     let claims = sample_claims(Op::Get, now().unix_timestamp() + 60);
 
@@ -218,4 +194,28 @@ fn claims_without_content_type_and_etag_deserialize_with_empty_defaults() {
     let claims: Claims = serde_json::from_value(json).expect("deserialize old-shape claims");
     assert_eq!(claims.content_type, "");
     assert_eq!(claims.etag, "");
+}
+
+#[test]
+fn signing_failure_propagates_as_an_internal_error() {
+    struct FailingSigner;
+    impl SignatureProvider for FailingSigner {
+        fn sign(&self, _: &[u8]) -> Result<Vec<u8>, DomainError> {
+            Err(DomainError::InternalError)
+        }
+        fn public_key(&self) -> Vec<u8> {
+            Vec::new()
+        }
+        fn verifier(&self) -> Arc<dyn SignatureVerifier> {
+            Arc::new(Self)
+        }
+    }
+    impl SignatureVerifier for FailingSigner {
+        fn verify(&self, _: &[u8], _: &[u8]) -> Result<(), DomainError> {
+            Err(DomainError::InternalError)
+        }
+    }
+    let issuer = Issuer::with_provider(Arc::new(FailingSigner), 3600);
+    let result = issuer.issue(sample_claims(Op::Get, now().unix_timestamp() + 60), now());
+    assert!(matches!(result, Err(DomainError::InternalError)));
 }
