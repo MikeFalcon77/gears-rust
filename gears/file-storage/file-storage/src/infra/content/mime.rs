@@ -4,10 +4,18 @@ use crate::domain::error::DomainError;
 use crate::domain::policy::{EffectivePolicy, PolicyResolver};
 
 /// Detect the content type from the leading bytes; `None` if there is no recognizable
-/// signature (plain text, CSV, custom binary).
+/// signature (plain text, CSV, custom binary). `infer` >= 0.20 scans the first 1024 bytes for
+/// `%PDF`, which misclassifies text that merely mentions it (and shadows the HTML/XML/shell
+/// matchers that run after it), so a PDF is trusted only when the header is at offset 0.
 #[must_use]
 pub fn detect(bytes: &[u8]) -> Option<&'static str> {
-    infer::get(bytes).map(|t| t.mime_type())
+    let mime = infer::get(bytes)?.mime_type();
+    if mime != "application/pdf" || bytes.starts_with(b"%PDF") {
+        return Some(mime);
+    }
+    ["text/html", "text/xml", "text/x-shellscript"]
+        .into_iter()
+        .find(|&text_mime| infer::is_mime(bytes, text_mime))
 }
 
 /// Validate the declared mime against the detected signature. Rejected only when the bytes
@@ -29,8 +37,9 @@ fn mime_equivalent(a: &str, b: &str) -> bool {
     essence(a) == essence(b)
 }
 
-/// How many leading bytes of the stored blob are read for MIME sniffing. The deepest `infer`
-/// matcher (a legacy RAR signature) looks at offset 261, so 8 KiB never changes a sniff result.
+/// How many leading bytes of the stored blob are read for MIME sniffing. The widest fixed
+/// `infer` window is the PDF header search over the first 1024 bytes (the Matroska/WebM doctype
+/// search uses 256), so 8 KiB never changes a sniff result.
 /// Shared by the single-part and multipart finalize paths.
 pub(crate) const MIME_SNIFF_PREFIX_BYTES: usize = 8 * 1024;
 
