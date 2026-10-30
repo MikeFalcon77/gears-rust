@@ -796,7 +796,7 @@ fn a_subject_key_is_pinned_to_its_byte_form() {
         let mut hasher = Sha256::new();
         for field in ["gts.cf.core.qe.subj.v1~acme.tenant.v1", "t-1"] {
             hasher.update(
-                &u32::try_from(field.len())
+                u32::try_from(field.len())
                     .expect("short field")
                     .to_be_bytes(),
             );

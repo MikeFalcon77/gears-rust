@@ -1442,7 +1442,7 @@ fn identity_hash(
         normalization.as_bytes(),
         &dimension.to_be_bytes(),
     ] {
-        hasher.update(&(part.len() as u64).to_be_bytes());
+        hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part);
     }
     hex::encode(hasher.finalize())

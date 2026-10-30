@@ -79,7 +79,7 @@ The following crates are **legitimately transitively pulled** by upstream depend
 
 | Crate (currently in graph) | Pulled by (representative upstream) | Cleanup approach |
 |---|---|---|
-| `ring` 0.17 | `sqlx-core` (rustls `ring` feature) / `ureq` (Pingora removed, [ADR toolkit/0004](../../../adrs/toolkit/0004-toolkit-http-proxy-engine.md)) | Application JWT verification now uses the facade; remove remaining upstream TLS/build feature paths |
+| `ring` 0.17 | `api-gateway` build dependency `ureq` (default `_ring` feature) (Pingora removed, [ADR toolkit/0004](../../../adrs/toolkit/0004-toolkit-http-proxy-engine.md)) | Application JWT verification now uses the facade; remove remaining upstream TLS/build feature paths |
 | `aws-lc-rs` 1.x (non-FIPS) | rustls's default features | Use `rustls/fips` exclusively on Linux; macOS/Windows already excluded via shim — but the non-FIPS crate is pulled into the same binary by Cargo feature unification |
 | `chacha20` 0.10 | `rand` ecosystem | Reroute `rand`'s ChaCha-based DRBG through our provider, or switch to a SecRandom-based source |
 | `md-5`, `sha1`, `blake2`, `blake3`, `aes`, `hmac`, `hkdf`, `pbkdf2`, `rsa`, `p256`, `p384`, `k256` (if added in future) | TBD audit | Replace upstream call sites with our `rustls::crypto::*` impls or remove the upstream |
@@ -88,8 +88,9 @@ These will be denied as their upstream usage is removed. Each move from Phase B 
 
 ### Phase C — Application facade enforcement
 
-The workspace now uses `toolkit_security::crypto` for its application primitives,
-including JWT signature verification and per-OS TLS provider selection.
+The workspace uses `toolkit_security::crypto` for application primitives.
+`toolkit_security::jwt` verifies JWTs through these primitives, and
+`toolkit_security::tls` selects the TLS provider using the same per-OS policy.
 `tools/scripts/check_crypto_facade.py` uses Cargo metadata to reject direct primitive
 dependencies outside the facade, including aliases and target/build sections. Named dev-only
 independent crypto oracles remain allowed. A source guard checks common direct TLS/JWT
@@ -97,8 +98,8 @@ backend bypasses. CI runs the guard and its regression tests. This is not a gene
 type-analysis lint and does not prove absence of arbitrary re-export bypasses.
 
 The facade covers the algorithms used today; unused AES/HKDF application APIs are deferred.
-Ed25519 signed URLs keep their existing format in ordinary mode and fail explicitly under
-FIPS. See [design](../crypto-facade-spec.md) and [source audit](../crypto-facade-audit.md).
+File-storage signed URLs use ECDSA P-256/SHA-256 through the selected provider in both modes.
+Existing Ed25519 keys and tokens require coordinated replacement.
 Phase B remains open for third-party/transitive crypto; these controls do not certify a binary.
 
 ## Pros and Cons of the Options

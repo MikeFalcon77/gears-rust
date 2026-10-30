@@ -1,6 +1,6 @@
 //! Execute CNG primitives even on CI hosts without Windows FIPS policy.
 //! Internal injection does not change the production provider/witness gate.
-use super::*;
+use super::{CryptoError, backend, ecdsa, hash, initialize, mac, rng, rsa};
 use aws_lc_rs::signature::{self, KeyPair};
 use pkcs1::der::Decode;
 
@@ -95,12 +95,12 @@ fn native_cng_operations() {
     }
     for (algorithm, signing) in [
         (
-            jsonwebtoken::Algorithm::ES256,
-            &signature::ECDSA_P256_SHA256_FIXED_SIGNING,
+            ecdsa::EcdsaAlgorithm::P256Sha256,
+            &signature::ECDSA_P256_SHA256_ASN1_SIGNING,
         ),
         (
-            jsonwebtoken::Algorithm::ES384,
-            &signature::ECDSA_P384_SHA384_FIXED_SIGNING,
+            ecdsa::EcdsaAlgorithm::P384Sha384,
+            &signature::ECDSA_P384_SHA384_ASN1_SIGNING,
         ),
     ] {
         let private =
@@ -110,7 +110,7 @@ fn native_cng_operations() {
         let signature = key
             .sign(&aws_lc_rs::rand::SystemRandom::new(), b"CNG ECDSA")
             .unwrap();
-        jwt::verify_ecdsa_with_provider(
+        ecdsa::verify_signature_with_provider(
             &provider,
             algorithm,
             key.public_key().as_ref(),
@@ -119,7 +119,7 @@ fn native_cng_operations() {
         )
         .unwrap();
         assert!(
-            jwt::verify_ecdsa_with_provider(
+            ecdsa::verify_signature_with_provider(
                 &provider,
                 algorithm,
                 key.public_key().as_ref(),

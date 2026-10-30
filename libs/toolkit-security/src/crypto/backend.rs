@@ -8,21 +8,7 @@ use super::CryptoError;
 
 static PROVIDER: OnceLock<Result<CryptoProvider, CryptoError>> = OnceLock::new();
 
-// An unrelated library installing a TLS provider must not change application crypto.
-pub(super) fn configured_provider() -> CryptoProvider {
-    #[cfg(all(feature = "fips", target_os = "macos"))]
-    {
-        rustls_corecrypto_provider::fips_provider()
-    }
-    #[cfg(all(feature = "fips", target_os = "windows"))]
-    {
-        rustls_cng_crypto::fips_provider()
-    }
-    #[cfg(not(all(feature = "fips", any(target_os = "macos", target_os = "windows"))))]
-    {
-        rustls::crypto::aws_lc_rs::default_provider()
-    }
-}
+pub(super) use crate::provider::configured_provider;
 
 pub(super) fn provider() -> Result<&'static CryptoProvider, CryptoError> {
     PROVIDER

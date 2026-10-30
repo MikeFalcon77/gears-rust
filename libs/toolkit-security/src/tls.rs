@@ -12,5 +12,5 @@ pub use rustls::crypto::CryptoProvider;
 /// application primitives validate their independently cached provider.
 #[must_use]
 pub fn configured_provider() -> CryptoProvider {
-    super::backend::configured_provider()
+    crate::provider::configured_provider()
 }

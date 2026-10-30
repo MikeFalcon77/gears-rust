@@ -28,12 +28,12 @@ impl Validator {
         // TODO(P1): subject visibility-chain version, Context Tenant availability-chain
         // version, routing generation.
         let mut ctx = Sha256::new();
-        ctx.update(&[VERSION]);
-        ctx.update(&resource_version.to_be_bytes());
+        ctx.update([VERSION]);
+        ctx.update(resource_version.to_be_bytes());
         match resolution_fingerprint {
-            None => ctx.update(&[0]),
+            None => ctx.update([0]),
             Some(fingerprint) => {
-                ctx.update(&[1]);
+                ctx.update([1]);
                 update_prefixed(&mut ctx, fingerprint);
             }
         }
@@ -92,7 +92,7 @@ impl IfNoneMatch {
 
 /// Length-prefixed, so no two field splits digest alike.
 fn update_prefixed(ctx: &mut Sha256, bytes: &[u8]) {
-    ctx.update(&(bytes.len() as u64).to_be_bytes());
+    ctx.update((bytes.len() as u64).to_be_bytes());
     ctx.update(bytes);
 }
 
@@ -101,7 +101,7 @@ fn update_prefixed(ctx: &mut Sha256, bytes: &[u8]) {
 fn update_selection(ctx: &mut Sha256, selection: FieldSelection) {
     let names = || selection.fields().map(EntityField::name);
     let len = names().map(str::len).sum::<usize>() + names().count().saturating_sub(1);
-    ctx.update(&(len as u64).to_be_bytes());
+    ctx.update((len as u64).to_be_bytes());
     for (index, name) in names().enumerate() {
         if index > 0 {
             ctx.update(b",");

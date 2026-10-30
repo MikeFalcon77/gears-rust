@@ -68,7 +68,7 @@ impl FakeEmbeddingProvider {
         while lanes.len() < dimension {
             let mut hasher = Sha256::new();
             hasher.update(input.as_bytes());
-            hasher.update(&block.to_be_bytes());
+            hasher.update(block.to_be_bytes());
             let digest = hasher.finalize();
             for lane in digest.as_ref().as_chunks::<BYTES_PER_LANE>().0 {
                 if lanes.len() == dimension {

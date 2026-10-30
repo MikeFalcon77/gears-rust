@@ -10,9 +10,11 @@ use jsonwebtoken::{
 use pkcs1::der::{Decode, Encode};
 use serde::de::DeserializeOwned;
 
-use super::{
-    backend,
-    signature::{RsaAlgorithm, verify_rsa_components},
+use crate::crypto::{
+    CryptoError,
+    signature::{
+        EcdsaAlgorithm, RsaAlgorithm, verify_ecdsa as verify_ecdsa_der, verify_rsa_components,
+    },
 };
 
 /// Decode a JWT, verifying its signature with the configured OS backend and
@@ -46,6 +48,8 @@ pub fn decode<T: DeserializeOwned>(
     }
     verify(token, key, &header)?;
     let mut claims_policy = validation.clone();
+    // verify() above authenticates the original token through the native facade.
+    // Disable only the duplicate signature check, retaining claim validation.
     // dangerous::insecure_decode would also skip claims validation.
     #[allow(deprecated)]
     claims_policy.insecure_disable_signature_validation();
@@ -68,7 +72,6 @@ fn verify(token: &str, key: &DecodingKey, header: &Header) -> Result<()> {
     let signature = URL_SAFE_NO_PAD
         .decode(parts[2])
         .map_err(|_| jsonwebtoken::errors::Error::from(ErrorKind::InvalidSignature))?;
-    let invalid = || jsonwebtoken::errors::Error::from(ErrorKind::InvalidSignature);
     match header.alg {
         Algorithm::RS256
         | Algorithm::RS384
@@ -88,10 +91,10 @@ fn verify(token: &str, key: &DecodingKey, header: &Header) -> Result<()> {
             match key.kind() {
                 DecodingKeyKind::RsaModulusExponent { n, e } => {
                     verify_rsa_components(algorithm, n, e, message, &signature)
-                        .map_err(|_| invalid())
+                        .map_err(map_signature_error)
                 }
                 DecodingKeyKind::SecretOrDer(der) => {
-                    let key = rsa_public_key(der).map_err(|_| invalid())?;
+                    let key = rsa_public_key(der).map_err(map_signature_error)?;
                     verify_rsa_components(
                         algorithm,
                         key.modulus.as_bytes(),
@@ -99,12 +102,13 @@ fn verify(token: &str, key: &DecodingKey, header: &Header) -> Result<()> {
                         message,
                         &signature,
                     )
-                    .map_err(|_| invalid())
+                    .map_err(map_signature_error)
                 }
             }
         }
         Algorithm::ES256 | Algorithm::ES384 => {
-            verify_ecdsa(header.alg, key.as_bytes(), message, &signature).map_err(|_| invalid())
+            verify_ecdsa(header.alg, key.as_bytes(), message, &signature)
+                .map_err(map_signature_error)
         }
         // HMAC verifier constructors initialize AWS-LC state even with
         // verification disabled. This adapter supports only the existing
@@ -115,14 +119,21 @@ fn verify(token: &str, key: &DecodingKey, header: &Header) -> Result<()> {
     }
 }
 
-fn rsa_public_key(
-    bytes: &[u8],
-) -> std::result::Result<pkcs1::RsaPublicKey<'_>, super::CryptoError> {
+fn map_signature_error(error: CryptoError) -> jsonwebtoken::errors::Error {
+    match error {
+        CryptoError::InvalidKey | CryptoError::InvalidSignature | CryptoError::MessageTooLong => {
+            ErrorKind::InvalidSignature.into()
+        }
+        _ => ErrorKind::Provider(error.to_string()).into(),
+    }
+}
+
+fn rsa_public_key(bytes: &[u8]) -> std::result::Result<pkcs1::RsaPublicKey<'_>, CryptoError> {
     if let Ok(key) = pkcs1::RsaPublicKey::from_der(bytes) {
         return Ok(key);
     }
-    let spki = spki::SubjectPublicKeyInfoRef::from_der(bytes)
-        .map_err(|_| super::CryptoError::InvalidKey)?;
+    let spki =
+        spki::SubjectPublicKeyInfoRef::from_der(bytes).map_err(|_| CryptoError::InvalidKey)?;
     // Only rsaEncryption: never discard RSA-PSS algorithm/key constraints.
     if spki.algorithm.oid != pkcs1::ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1")
         || spki
@@ -130,13 +141,13 @@ fn rsa_public_key(
             .parameters
             .is_some_and(|params| params != pkcs1::der::asn1::AnyRef::NULL)
     {
-        return Err(super::CryptoError::InvalidKey);
+        return Err(CryptoError::InvalidKey);
     }
     let bytes = spki
         .subject_public_key
         .as_bytes()
-        .ok_or(super::CryptoError::InvalidKey)?;
-    pkcs1::RsaPublicKey::from_der(bytes).map_err(|_| super::CryptoError::InvalidKey)
+        .ok_or(CryptoError::InvalidKey)?;
+    pkcs1::RsaPublicKey::from_der(bytes).map_err(|_| CryptoError::InvalidKey)
 }
 
 fn verify_ecdsa(
@@ -144,69 +155,31 @@ fn verify_ecdsa(
     key: &[u8],
     message: &[u8],
     signature: &[u8],
-) -> std::result::Result<(), super::CryptoError> {
-    verify_ecdsa_with_provider(backend::provider()?, algorithm, key, message, signature)
-}
-
-// Provider injection stays internal; production callers always validate its witness.
-pub(super) fn verify_ecdsa_with_provider(
-    provider: &rustls::crypto::CryptoProvider,
-    algorithm: Algorithm,
-    key: &[u8],
-    message: &[u8],
-    signature: &[u8],
-) -> std::result::Result<(), super::CryptoError> {
-    use rustls::pki_types::alg_id;
-    let (size, scheme, key_id, signature_id) = match algorithm {
-        Algorithm::ES256 => (
-            32,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            alg_id::ECDSA_P256,
-            alg_id::ECDSA_SHA256,
-        ),
-        Algorithm::ES384 => (
-            48,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            alg_id::ECDSA_P384,
-            alg_id::ECDSA_SHA384,
-        ),
-        _ => return Err(super::CryptoError::UnsupportedAlgorithm),
+) -> std::result::Result<(), CryptoError> {
+    let (size, primitive) = match algorithm {
+        Algorithm::ES256 => (32, EcdsaAlgorithm::P256Sha256),
+        Algorithm::ES384 => (48, EcdsaAlgorithm::P384Sha384),
+        _ => return Err(CryptoError::UnsupportedAlgorithm),
     };
     if signature.len() != size * 2 || key.len() != size * 2 + 1 || key[0] != 4 {
-        return Err(super::CryptoError::InvalidSignature);
+        return Err(CryptoError::InvalidSignature);
     }
     if message.len() > u32::MAX as usize {
-        return Err(super::CryptoError::MessageTooLong);
+        return Err(CryptoError::MessageTooLong);
     }
     // JOSE uses fixed-width r||s; the TLS verifier expects an ASN.1 sequence
     // of positive INTEGERs. Each encoded scalar and the sequence are <128B.
     let mut der = vec![0x30, 0];
     for scalar in signature.chunks_exact(size) {
-        let integer =
-            pkcs1::UintRef::new(scalar).map_err(|_| super::CryptoError::InvalidSignature)?;
+        let integer = pkcs1::UintRef::new(scalar).map_err(|_| CryptoError::InvalidSignature)?;
         der.extend(
             integer
                 .to_der()
-                .map_err(|_| super::CryptoError::InvalidSignature)?,
+                .map_err(|_| CryptoError::InvalidSignature)?,
         );
     }
-    der[1] = u8::try_from(der.len() - 2).map_err(|_| super::CryptoError::InvalidSignature)?;
-    let algorithms = provider
-        .signature_verification_algorithms
-        .mapping
-        .iter()
-        .find(|(candidate, _)| *candidate == scheme)
-        .map(|(_, algorithms)| *algorithms)
-        .ok_or(super::CryptoError::UnsupportedAlgorithm)?;
-    if algorithms.iter().any(|verifier| {
-        verifier.public_key_alg_id() == key_id
-            && verifier.signature_alg_id() == signature_id
-            && verifier.verify_signature(key, message, &der).is_ok()
-    }) {
-        Ok(())
-    } else {
-        Err(super::CryptoError::InvalidSignature)
-    }
+    der[1] = u8::try_from(der.len() - 2).map_err(|_| CryptoError::InvalidSignature)?;
+    verify_ecdsa_der(primitive, key, message, &der)
 }
 
 fn family(algorithm: Algorithm) -> AlgorithmFamily {

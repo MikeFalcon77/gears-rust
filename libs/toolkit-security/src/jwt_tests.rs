@@ -1,5 +1,9 @@
-use super::*;
+use super::{decode, map_signature_error, rsa_public_key, verify_ecdsa};
+use crate::crypto::CryptoError;
 use aws_lc_rs::signature::{self, KeyPair};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use jsonwebtoken::{Algorithm, DecodingKey, Header, Validation, errors::ErrorKind};
+use pkcs1::der::{Decode, Encode};
 use serde_json::{Value, json};
 
 fn claims() -> Value {
@@ -16,7 +20,7 @@ fn policy(algorithm: Algorithm) -> Validation {
 
 #[test]
 fn rsa_claim_validation_and_der_formats_remain_compatible() {
-    let pem = include_bytes!("testdata/rsa-private.pem");
+    let pem = include_bytes!("crypto/testdata/rsa-private.pem");
     let encoding = jsonwebtoken::EncodingKey::from_rsa_pem(pem).unwrap();
     let aws_key = signature::RsaKeyPair::from_pkcs8(encoding.inner())
         .or_else(|_| signature::RsaKeyPair::from_der(encoding.inner()))
@@ -123,7 +127,7 @@ fn ecdsa_fixed_signatures_use_exact_curve_and_hash() {
 #[test]
 fn disabled_signature_flag_cannot_bypass_facade_and_claim_policy_is_preserved() {
     let encoding =
-        jsonwebtoken::EncodingKey::from_rsa_pem(include_bytes!("testdata/rsa-private.pem"))
+        jsonwebtoken::EncodingKey::from_rsa_pem(include_bytes!("crypto/testdata/rsa-private.pem"))
             .unwrap();
     let aws_key = signature::RsaKeyPair::from_pkcs8(encoding.inner())
         .or_else(|_| signature::RsaKeyPair::from_der(encoding.inner()))
@@ -185,6 +189,30 @@ fn unused_jwt_families_are_rejected_before_claims_pass() {
             .unwrap_err()
             .kind(),
             ErrorKind::InvalidAlgorithm
+        ));
+    }
+}
+
+#[test]
+fn crypto_backend_failures_remain_operational_errors() {
+    for error in [
+        CryptoError::FipsUnavailable,
+        CryptoError::Sha256Unavailable,
+        CryptoError::UnsupportedAlgorithm,
+    ] {
+        assert!(matches!(
+            map_signature_error(error).kind(),
+            ErrorKind::Provider(_)
+        ));
+    }
+    for error in [
+        CryptoError::InvalidKey,
+        CryptoError::InvalidSignature,
+        CryptoError::MessageTooLong,
+    ] {
+        assert!(matches!(
+            map_signature_error(error).kind(),
+            ErrorKind::InvalidSignature
         ));
     }
 }

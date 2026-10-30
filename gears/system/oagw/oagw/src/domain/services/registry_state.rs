@@ -88,7 +88,7 @@ struct Encoder(Sha256);
 
 impl Encoder {
     fn bytes(&mut self, bytes: &[u8]) {
-        self.0.update(&(bytes.len() as u64).to_be_bytes());
+        self.0.update((bytes.len() as u64).to_be_bytes());
         self.0.update(bytes);
     }
 

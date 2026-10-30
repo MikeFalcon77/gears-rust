@@ -120,7 +120,7 @@ pub fn init_crypto_provider() -> Result<(), CryptoProviderError> {
             #[cfg(all(feature = "fips", target_os = "macos"))]
             {
                 // The facade owns target selection and explicitly selects fips_provider().
-                if let Err(prev) = toolkit_security::crypto::tls::configured_provider().install_default()
+                if let Err(prev) = toolkit_security::tls::configured_provider().install_default()
                 {
                     tracing::error!(
                         previous_provider = ?prev,
@@ -143,7 +143,7 @@ pub fn init_crypto_provider() -> Result<(), CryptoProviderError> {
                 // `BCryptGetFipsAlgorithmMode` ourselves. Refuse to install
                 // rather than degrade the FIPS claim with a non-handshakeable
                 // provider.
-                let provider = toolkit_security::crypto::tls::configured_provider();
+                let provider = toolkit_security::tls::configured_provider();
                 if provider.cipher_suites.is_empty() {
                     tracing::error!(
                         "Windows FIPS mode not enabled (FipsAlgorithmPolicy != 1); \
@@ -163,7 +163,7 @@ pub fn init_crypto_provider() -> Result<(), CryptoProviderError> {
 
             #[cfg(all(feature = "fips", not(any(target_os = "macos", target_os = "windows"))))]
             {
-                if let Err(prev) = toolkit_security::crypto::tls::configured_provider().install_default() {
+                if let Err(prev) = toolkit_security::tls::configured_provider().install_default() {
                     tracing::error!(
                         previous_provider = ?prev,
                         "FIPS crypto provider conflict: another rustls provider was already installed"
@@ -187,7 +187,7 @@ pub fn init_crypto_provider() -> Result<(), CryptoProviderError> {
 
             #[cfg(not(feature = "fips"))]
             {
-                if let Err(prev) = toolkit_security::crypto::tls::configured_provider().install_default() {
+                if let Err(prev) = toolkit_security::tls::configured_provider().install_default() {
                     // Non-fatal: another provider is already active, TLS still works.
                     tracing::warn!(
                         previous_provider = ?prev,

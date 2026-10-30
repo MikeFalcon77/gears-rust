@@ -43,6 +43,50 @@ class CryptoFacadePolicyTests(unittest.TestCase):
                        'let url = "https://issuer"; jsonwebtoken::decode::<Claims>(token, key, validation);']:
             self.assertTrue(guard.source_errors("gears/new/src/lib.rs", source))
 
+    def test_strings_and_comments_cannot_hide_following_calls(self):
+        literals = [
+            r'"escaped \" // still in string"',
+            r'"line\n // still in string"',
+            'r###"https://issuer/"quote"###',
+        ]
+        for literal in literals:
+            prefix = f"let text = {literal}; "
+            self.assertTrue(guard.source_errors("gears/new/src/lib.rs",
+                prefix + "jsonwebtoken::decode::<Claims>(token, key, validation);"))
+            self.assertFalse(guard.source_errors("gears/new/src/lib.rs",
+                prefix + "// jsonwebtoken::decode::<Claims>(token, key, validation);"))
+
+    def test_reviewed_module_and_provider_bypasses_are_rejected(self):
+        for source in [
+            "use rustls::crypto; crypto::aws_lc_rs::default_provider();",
+            "use rustls::crypto::{self, CryptoProvider}; crypto::aws_lc_rs::default_provider();",
+            "rustls::crypto::ring::default_provider();",
+            "use jsonwebtoken::crypto; crypto::verify(sig,msg,key,alg);",
+            "jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER;",
+        ]:
+            self.assertTrue(guard.source_errors("gears/new/src/lib.rs", source), source)
+        self.assertFalse(guard.source_errors("libs/toolkit-http/src/lib.rs", "use rustls::crypto::{CryptoProvider, verify_tls13_signature};"))
+
+    def test_direct_ring_feature_and_renamed_feature_forwarding(self):
+        dependency = {"name": "rustls", "kind": None, "features": ["ring"]}
+        self.assertTrue(guard.dependency_errors(self.metadata("gears/new", dependency), Path("/repo")))
+        dependency.update(rename="tls", features=[])
+        metadata = self.metadata("gears/new", dependency)
+        metadata["packages"][0]["features"] = {"custom": ["tls?/ring"]}
+        self.assertTrue(guard.dependency_errors(metadata, Path("/repo")))
+
+    def test_source_oracle_is_explicit(self):
+        source = "jsonwebtoken::crypto::aws_lc::DEFAULT_PROVIDER;"
+        for path in guard.SOURCE_ORACLES:
+            self.assertFalse(guard.source_errors(path, source))
+        self.assertTrue(guard.source_errors("libs/new/tests/test.rs", source))
+
+    def test_protocol_adapter_does_not_allow_backend_factories(self):
+        adapter = guard.FACADE + "/src/jwt.rs"
+        self.assertFalse(guard.source_errors(adapter, "jsonwebtoken::decode::<Claims>(token, key, validation);"))
+        self.assertTrue(guard.source_errors(adapter, "rustls::crypto::aws_lc_rs::default_provider();"))
+        self.assertTrue(guard.source_errors("libs/new/src/jwt.rs", "jsonwebtoken::decode::<Claims>(token, key, validation);"))
+
 
 if __name__ == "__main__":
     unittest.main()

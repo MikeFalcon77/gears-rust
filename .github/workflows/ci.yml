@@ -616,6 +616,17 @@ jobs:
           cargo check --target x86_64-pc-windows-msvc -p cf-gears-toolkit-http --features fips
           cargo check --target x86_64-pc-windows-msvc -p cf-gears-toolkit-http-proxy --features fips
 
+      - name: Check FIPS sidecar configuration
+        shell: bash
+        run: cargo check --locked -p cf-gears-file-storage --bin sidecar --features toolkit/fips
+
+      - name: Test native FIPS consumers
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo test --locked -p cf-gears-file-storage --features toolkit/fips --lib --bin sidecar
+          cargo test --locked -p cf-gears-credstore --features toolkit-security/fips --lib domain::secret::fence
+
       - name: Save compilation metrics
         if: always() && runner.os == 'Linux' && steps.sccache.outputs.enabled == 'true'
         continue-on-error: true

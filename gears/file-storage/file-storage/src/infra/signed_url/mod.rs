@@ -186,7 +186,8 @@ pub struct Verifier {
 
 impl Verifier {
     /// Construct from an uncompressed SEC1 P-256 public key (65 bytes).
-    /// Malformed encodings and unavailable backends fail before serving requests.
+    /// Checks length, uncompressed encoding and backend availability at startup.
+    /// The backend validates the curve point when verifying a signature.
     pub fn from_public_key(public_key: &[u8]) -> Result<Self, DomainError> {
         Ok(Self {
             verifier: Arc::new(provider::EcdsaP256Verifier::from_sec1_bytes(public_key)?),

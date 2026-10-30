@@ -60,22 +60,39 @@ pub const BOOTSTRAP_JITTER_MAX_MS: u64 = 0;
 /// The toolkit-security facade selects AWS-LC, corecrypto or CNG according
 /// to the build's platform/FIPS policy.
 ///
-/// # Panics
-/// Panics for an invalid key or a value beyond the facade's portable MAC limit.
-#[must_use]
-pub fn compute_fp(key: &[u8], value: &[u8]) -> Vec<u8> {
-    let key = HmacSha256::new(key).unwrap_or_else(|error| panic!("invalid fence key: {error}"));
-    key.sign(value)
-        .unwrap_or_else(|error| panic!("fence fingerprint failed: {error}"))
-        .to_vec()
+/// # Errors
+/// Returns an internal error for malformed keys, an unavailable backend or a
+/// value beyond the portable HMAC limit.
+pub fn compute_fp(key: &[u8], value: &[u8]) -> Result<Vec<u8>, DomainError> {
+    fence_mac(key)?
+        .sign(value)
+        .map(|fp| fp.to_vec())
+        .map_err(|error| DomainError::internal(format!("fence fingerprint failed: {error}")))
 }
 
-/// Constant-time fingerprint verification through the crypto facade.
-#[must_use]
-pub fn verify_fp(key: &[u8], value: &[u8], fp: &[u8]) -> bool {
+/// Compare a fingerprint in constant time. A mismatch is `Ok(false)`; backend
+/// failures are errors and must not be treated as an absent secret.
+///
+/// # Errors
+/// Returns the same configuration and operation errors as [`compute_fp`].
+pub fn verify_fp(key: &[u8], value: &[u8], fp: &[u8]) -> Result<bool, DomainError> {
+    match fence_mac(key)?.verify(value, fp) {
+        Ok(()) => Ok(true),
+        Err(toolkit_security::crypto::CryptoError::InvalidTag) => Ok(false),
+        Err(error) => Err(DomainError::internal(format!(
+            "fence verification failed: {error}"
+        ))),
+    }
+}
+
+fn fence_mac(key: &[u8]) -> Result<HmacSha256, DomainError> {
+    if key.len() != FENCE_KEY_LEN {
+        return Err(DomainError::internal(
+            "fence key must contain exactly 32 bytes",
+        ));
+    }
     HmacSha256::new(key)
-        .and_then(|key| key.verify(value, fp))
-        .is_ok()
+        .map_err(|error| DomainError::internal(format!("fence key initialization failed: {error}")))
 }
 
 /// Generate a fresh [`FENCE_KEY_LEN`]-byte fence key from the platform CSPRNG
@@ -85,8 +102,8 @@ pub fn verify_fp(key: &[u8], value: &[u8], fp: &[u8]) -> bool {
 ///
 /// Returns [`DomainError::Internal`] if the system RNG fails.
 pub fn generate_key() -> Result<Vec<u8>, DomainError> {
-    let mut buf = [0u8; FENCE_KEY_LEN];
-    rng::fill(&mut buf)
+    let mut buf = zeroize::Zeroizing::new([0u8; FENCE_KEY_LEN]);
+    rng::fill(buf.as_mut())
         .map_err(|_| DomainError::internal("fence: system RNG failed to generate a fence key"))?;
     Ok(buf.to_vec())
 }
@@ -99,22 +116,31 @@ mod tests {
     fn fp_is_deterministic_and_key_and_value_sensitive() {
         let k1 = vec![1u8; FENCE_KEY_LEN];
         let k2 = vec![2u8; FENCE_KEY_LEN];
-        let a = compute_fp(&k1, b"value");
-        assert_eq!(a, compute_fp(&k1, b"value"));
+        let a = compute_fp(&k1, b"value").unwrap();
+        assert_eq!(a, compute_fp(&k1, b"value").unwrap());
         assert_eq!(a.len(), 32);
-        assert_ne!(a, compute_fp(&k2, b"value"));
-        assert_ne!(a, compute_fp(&k1, b"other"));
+        assert_ne!(a, compute_fp(&k2, b"value").unwrap());
+        assert_ne!(a, compute_fp(&k1, b"other").unwrap());
     }
 
     #[test]
     fn verify_accepts_matching_and_rejects_foreign_fp() {
         let key = generate_key().expect("key");
-        let fp = compute_fp(&key, b"secret");
-        assert!(verify_fp(&key, b"secret", &fp));
-        assert!(!verify_fp(&key, b"tampered", &fp));
-        assert!(!verify_fp(&generate_key().expect("key"), b"secret", &fp));
+        let fp = compute_fp(&key, b"secret").unwrap();
+        assert!(verify_fp(&key, b"secret", &fp).unwrap());
+        assert!(!verify_fp(&key, b"tampered", &fp).unwrap());
+        assert!(!verify_fp(&generate_key().expect("key"), b"secret", &fp).unwrap());
         // Truncated/foreign-length fingerprints must not verify.
-        assert!(!verify_fp(&key, b"secret", &fp[..8]));
+        assert!(!verify_fp(&key, b"secret", &fp[..8]).unwrap());
+    }
+
+    #[test]
+    fn malformed_keys_return_errors_instead_of_panicking_or_mismatching() {
+        for length in [0, 13, 14, 31, 33, 65] {
+            let key = vec![7; length];
+            assert!(compute_fp(&key, b"value").is_err());
+            assert!(verify_fp(&key, b"value", &[0; 32]).is_err());
+        }
     }
 
     #[test]

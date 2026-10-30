@@ -552,8 +552,10 @@ were added by migration `m20260707_000001_content_hash_modes`.
 Signed URLs use ECDSA P-256/SHA-256 through `toolkit_security::crypto`. Private keys
 use PKCS#8 DER, public keys use 65-byte uncompressed SEC1 points, and signatures use
 ASN.1 DER. The private two-part token codec is not JWT or PASETO. Signing failures
-propagate as errors. Sidecar startup checks key encoding and backend availability
-before creating HTTP clients, and explicitly installs the facade-selected TLS provider.
+propagate as errors. Sidecar startup checks the public-key length, uncompressed
+encoding and backend availability before creating HTTP clients. The backend checks
+the curve point during signature verification. The sidecar explicitly installs
+the facade-selected TLS provider.
 
 ### Ed25519 to P-256 migration
 

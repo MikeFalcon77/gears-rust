@@ -13,7 +13,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use toolkit_macros::domain_model;
 use toolkit_security::SecurityContext;
-use toolkit_security::crypto::{hash::Sha256, mac::HmacSha256};
+use toolkit_security::crypto::{CryptoError, hash::Sha256, mac::HmacSha256};
 use uuid::Uuid;
 
 use super::failure::FailureReason;
@@ -947,7 +947,7 @@ impl CheckpointDigest {
         f.count("member_count", *member_count)?;
         f.digest("prev_checkpoint_hash", Some(prev_checkpoint_hash))?;
         let mut context = Sha256::new();
-        context.update(&f.finish());
+        context.update(f.finish());
         Ok(Self {
             context,
             expected: *member_count,
@@ -979,7 +979,7 @@ impl CheckpointDigest {
         f.uuid("member.order_id", Some(*order_id))?;
         f.positive("member.audit_sequence", Some(*audit_sequence))?;
         f.digest("member.entry_hash", Some(entry_hash))?;
-        self.context.update(&f.finish());
+        self.context.update(f.finish());
         self.pushed += 1;
         self.last = Some(*order_id);
         Ok(())
@@ -1370,6 +1370,9 @@ pub enum AdminTextKeyError {
     /// The key is shorter than 32 or longer than 1024 bytes.
     #[error("key must be 32..=1024 bytes")]
     KeyLength,
+    /// The configured crypto backend could not initialize the HMAC key.
+    #[error("audit crypto backend failed: {0}")]
+    Crypto(CryptoError),
 }
 
 /// The keyed minimization secret for `display_label`/`internal_notes` (D-204, amending D-96's
@@ -1382,7 +1385,7 @@ pub struct AdminTextKey {
 impl AdminTextKey {
     /// # Errors
     /// A malformed key ID, or a key shorter than [`MIN_ADMIN_TEXT_KEY_BYTES`] or longer than
-    /// [`MAX_ADMIN_TEXT_KEY_BYTES`].
+    /// [`MAX_ADMIN_TEXT_KEY_BYTES`], or an unavailable crypto backend.
     pub fn new(key_id: &str, key: &[u8]) -> Result<Self, AdminTextKeyError> {
         if key_id.is_empty()
             || key_id.len() > MAX_ADMIN_TEXT_KEY_ID_CHARS
@@ -1397,7 +1400,7 @@ impl AdminTextKey {
         }
         Ok(Self {
             key_id: key_id.to_owned(),
-            key: HmacSha256::new(key).map_err(|_| AdminTextKeyError::KeyLength)?,
+            key: HmacSha256::new(key).map_err(AdminTextKeyError::Crypto)?,
         })
     }
     /// The non-secret identifier recorded in every value this key produces.

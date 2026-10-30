@@ -1,4 +1,4 @@
-use super::*;
+use super::{EcdsaP256KeyPair, EcdsaP256VerifyingKey};
 use aws_lc_rs::signature::{ECDSA_P256_SHA256_ASN1, UnparsedPublicKey};
 
 const KEY: &[u8] = include_bytes!("../../tests/fixtures/p256-test-key.pk8");

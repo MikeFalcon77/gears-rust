@@ -13,7 +13,10 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use toolkit_security::crypto::signature::{RsaAlgorithm, verify_rsa_components};
+use toolkit_security::crypto::{
+    CryptoError,
+    signature::{RsaAlgorithm, verify_rsa_components},
+};
 
 #[derive(Debug, Clone, Deserialize)]
 struct Jwk {
@@ -375,7 +378,7 @@ impl JwksKeyProvider {
             return Err(ClaimsError::InvalidSignature);
         };
         verify_rsa_components(algorithm, n, e, signing_input.as_bytes(), &signature)
-            .map_err(|_| ClaimsError::InvalidSignature)?;
+            .map_err(map_signature_error)?;
 
         // Decode payload
         let payload_bytes = URL_SAFE_NO_PAD
@@ -517,6 +520,16 @@ fn decode_header_with_handler(
 /// Map `HttpError` variants to appropriate `ClaimsError` messages
 fn map_http_error(e: &toolkit_http::HttpError) -> ClaimsError {
     ClaimsError::JwksFetchFailed(crate::http_error::format_http_error(e, "JWKS"))
+}
+
+// Key/signature errors belong to the token; provider failures are operational.
+fn map_signature_error(error: CryptoError) -> ClaimsError {
+    match error {
+        CryptoError::InvalidKey | CryptoError::InvalidSignature | CryptoError::MessageTooLong => {
+            ClaimsError::InvalidSignature
+        }
+        _ => ClaimsError::Provider(format!("JWT crypto backend failed: {error}")),
+    }
 }
 
 /// Map this RSA-only JWKS provider's algorithms to the platform facade.
@@ -1231,6 +1244,22 @@ F8gvjIeiwVfp4nDnO2JFexiy
         assert_eq!(header.kid.as_deref(), Some("sign-key-1"));
         assert_eq!(header.extras.get("eap").map(String::as_str), Some("1"));
         assert_eq!(decoded_claims["sub"], "user-extras");
+    }
+
+    #[test]
+    fn backend_failure_is_not_reported_as_a_bad_signature() {
+        assert!(matches!(
+            map_signature_error(CryptoError::FipsUnavailable),
+            ClaimsError::Provider(_)
+        ));
+        assert!(matches!(
+            map_signature_error(CryptoError::UnsupportedAlgorithm),
+            ClaimsError::Provider(_)
+        ));
+        assert!(matches!(
+            map_signature_error(CryptoError::InvalidSignature),
+            ClaimsError::InvalidSignature
+        ));
     }
 
     #[test]

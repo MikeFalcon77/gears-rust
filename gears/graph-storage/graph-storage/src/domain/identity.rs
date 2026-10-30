@@ -22,7 +22,7 @@ pub fn derive_edge_key(type_uuid: Uuid, edge: &EdgeSpec) -> String {
         edge.dst_node_key.as_bytes(),
         edge.discriminator.as_deref().unwrap_or("").as_bytes(),
     ] {
-        hasher.update(&(part.len() as u64).to_be_bytes());
+        hasher.update((part.len() as u64).to_be_bytes());
         hasher.update(part);
     }
     hex::encode(hasher.finalize())

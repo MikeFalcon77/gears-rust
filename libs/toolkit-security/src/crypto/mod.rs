@@ -8,13 +8,10 @@
 mod backend;
 mod ecdsa;
 pub mod hash;
-#[cfg(feature = "jwt")]
-pub mod jwt;
 pub mod mac;
 pub mod rng;
 mod rsa;
 pub mod signature;
-pub mod tls;
 
 /// Failure to obtain the configured cryptographic implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

@@ -16,9 +16,9 @@ The `cf-gears-toolkit-security` crate provides:
 
 Use `crypto::hash::Sha256`, `crypto::mac::HmacSha256`, `crypto::rng::fill`,
 `crypto::constant_time_eq` and `crypto::signature` instead of backend crates.
-The optional `jwt` feature provides `crypto::jwt::decode`, preserving jsonwebtoken
+The optional `jwt` feature provides `jwt::decode`, preserving jsonwebtoken
 claim validation after verifying signatures through the facade. The explicit TLS
-adapter is `crypto::tls::configured_provider`.
+adapter is `tls::configured_provider`.
 
 Ordinary builds use AWS-LC. With `fips`, Linux uses AWS-LC FIPS, macOS uses the
 existing corecrypto provider and Windows uses CNG. `toolkit/fips` and
@@ -29,20 +29,18 @@ processing requests; infallible hash methods panic when backend policy cannot be
 
 ECDSA P-256/SHA-256 key generation, import, signing and verification use the selected
 backend. Its API accepts PKCS#8 DER keys with embedded uncompressed SEC1 public
-points, and emits ASN.1 DER signatures. Ed25519 remains available only in ordinary
-builds; FIPS builds reject it without fallback.
+points, and emits ASN.1 DER signatures. Verification also supports P-384/SHA-384.
 
 HMAC FIPS keys must be at least 14 bytes. HMAC and RSA/ECDSA messages are limited to
 `u32::MAX` bytes for portable CNG dispatch; SHA-256 and RNG split larger buffers.
-Facade-owned HMAC keys/normalization buffers are zeroized; this does not guarantee
-erasure of every intermediate copy in rustls or OS APIs.
+Facade-owned HMAC keys/normalization buffers are zeroized. PKCS#8 import transfers
+a private-key copy to rustls, and native key export uses OS-owned buffers; the
+facade cannot guarantee erasure of these copies or other backend intermediates.
 
 A provider's `fips()` status is a routing/runtime witness, not deployment certification.
 Follow the module certificate's operating-environment and security-policy requirements.
 macOS has an existing runtime OS-version check; Linux/Windows operating-environment
 coverage still requires release validation, and Windows must enable system FIPS policy.
-See [facade design](../../docs/security/fips/crypto-facade-spec.md) and
-[source audit](../../docs/security/fips/crypto-facade-audit.md).
 
 ## License
 

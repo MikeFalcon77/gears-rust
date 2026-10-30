@@ -97,7 +97,7 @@ pub fn get_crypto_provider() -> Arc<rustls::crypto::CryptoProvider> {
     rustls::crypto::CryptoProvider::get_default()
         .cloned()
         .unwrap_or_else(|| {
-            let provider = toolkit_security::crypto::tls::configured_provider();
+            let provider = toolkit_security::tls::configured_provider();
             #[cfg(all(feature = "fips", target_os = "windows"))]
             assert!(
                 !provider.cipher_suites.is_empty(),
@@ -168,7 +168,7 @@ mod fips_test_provider {
         // `install_default()` returns `Err` if a provider is already installed
         // (benign here); drop the result. `drop` rather than `let _ =`
         // satisfies clippy::let_underscore_must_use.
-        drop(toolkit_security::crypto::tls::configured_provider().install_default());
+        drop(toolkit_security::tls::configured_provider().install_default());
     });
 }
 

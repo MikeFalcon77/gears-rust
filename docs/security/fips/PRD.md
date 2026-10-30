@@ -153,9 +153,10 @@ engineering.
 - **Gears themselves on the CMVP Validated Modules list.** Gears are consumers of validated modules; the validated
   modules are Apple corecrypto, AWS-LC FIPS Provider, and Microsoft Windows CNG.
 - **Transitive crypto in the binary.** Application hashes, MACs, randomness and JWT signature
-  verification route through `toolkit_security::crypto` under the same per-OS policy as TLS
-  ([facade design](crypto-facade-spec.md)). Ordinary Ed25519 signed URLs are explicitly rejected
-  under FIPS. Third-party dependencies still link crypto outside this facade; Phase B in
+  verification use `toolkit_security::crypto` primitives; the JWT adapter lives in
+  `toolkit_security::jwt`. TLS provider selection lives in `toolkit_security::tls`
+  and uses the same per-OS policy.
+  File-storage signed URLs use ECDSA P-256/SHA-256 through the facade. Third-party dependencies still link crypto outside this facade; Phase B in
   [ADR 0005](adrs/0005-fips-dependency-policy.md) tracks that separate cleanup. This does not
   establish a full-binary FIPS claim.
 - **TLS 1.2 FIPS claim on macOS.** Apple does not expose a CAVS-listed TLS-PRF primitive; `fips_provider()` on macOS is
@@ -572,7 +573,7 @@ TLS state machine. Only the crypto-primitive backend behind a `cfg` branch MUST 
 - [ ] **TODO-6**: CMVP-cert-version pinning automation. Today the release checklist asks the engineer to manually verify
   CMVP cert OE coverage. Automate by scraping the CMVP search results into the CI gate.
 - [ ] **TODO-7**: Transitive non-TLS crypto cleanup. Application primitives and JWT verification now
-  use the per-OS facade; see [source audit](crypto-facade-audit.md). Remaining upstream-internal
+  use the per-OS facade. Remaining upstream-internal
   crypto and binary-wide policy are tracked by [ADR 0005](adrs/0005-fips-dependency-policy.md),
   `deny-fips.toml` Phase B. Do not equate facade migration with a complete transitive purge.
 - [ ] **TODO-8**: Runtime OE-validation on Linux + Windows. The macOS branch reads `kern.osproductversion` and panics

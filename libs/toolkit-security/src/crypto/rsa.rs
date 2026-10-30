@@ -3,6 +3,7 @@
 
 use pkcs1::der::Encode;
 use rustls::SignatureScheme;
+use rustls::pki_types::alg_id;
 
 use super::{CryptoError, backend};
 
@@ -25,6 +26,17 @@ pub enum RsaAlgorithm {
 }
 
 impl RsaAlgorithm {
+    fn signature_id(self) -> alg_id::AlgorithmIdentifier {
+        match self {
+            Self::Pkcs1Sha256 => alg_id::RSA_PKCS1_SHA256,
+            Self::Pkcs1Sha384 => alg_id::RSA_PKCS1_SHA384,
+            Self::Pkcs1Sha512 => alg_id::RSA_PKCS1_SHA512,
+            Self::PssSha256 => alg_id::RSA_PSS_SHA256,
+            Self::PssSha384 => alg_id::RSA_PSS_SHA384,
+            Self::PssSha512 => alg_id::RSA_PSS_SHA512,
+        }
+    }
+
     fn scheme(self) -> SignatureScheme {
         match self {
             Self::Pkcs1Sha256 => SignatureScheme::RSA_PKCS1_SHA256,
@@ -86,9 +98,11 @@ pub(super) fn verify_with_provider(
         .map(|(_, algorithms)| *algorithms)
         .ok_or(CryptoError::UnsupportedAlgorithm)?;
     if algorithms.iter().any(|verifier| {
-        verifier
-            .verify_signature(&public_key, message, signature)
-            .is_ok()
+        verifier.public_key_alg_id() == alg_id::RSA_ENCRYPTION
+            && verifier.signature_alg_id() == algorithm.signature_id()
+            && verifier
+                .verify_signature(&public_key, message, signature)
+                .is_ok()
     }) {
         Ok(())
     } else {

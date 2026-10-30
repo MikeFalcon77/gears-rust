@@ -364,7 +364,7 @@ impl IdempotencySubjectKey {
                 // Catalogue limits keep lengths within `u32`; saturation remains
                 // deterministic for defensive callers.
                 let len = u32::try_from(field.len()).unwrap_or(u32::MAX);
-                hasher.update(&len.to_be_bytes());
+                hasher.update(len.to_be_bytes());
                 hasher.update(field.as_bytes());
             }
         }

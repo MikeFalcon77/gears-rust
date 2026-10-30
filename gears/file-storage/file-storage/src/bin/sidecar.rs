@@ -102,7 +102,7 @@ const DEFAULT_MAX_BODY_BYTES: usize = 5_368_709_120;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     toolkit_security::crypto::initialize().map_err(|e| anyhow::anyhow!("crypto backend: {e}"))?;
-    toolkit_security::crypto::tls::configured_provider()
+    toolkit_security::tls::configured_provider()
         .install_default()
         .map_err(|_| anyhow::anyhow!("a conflicting TLS provider was already installed"))?;
     let addr: SocketAddr = std::env::var("FS_SIDECAR_ADDR")

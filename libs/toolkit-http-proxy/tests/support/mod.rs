@@ -31,7 +31,7 @@ pub type RespBody = BoxBody<Bytes, Infallible>;
 /// per-platform choice as `toolkit-http`: Apple corecrypto on macOS, CNG on
 /// Windows (empty unless the host is in FIPS mode), AWS-LC FIPS elsewhere.
 pub fn install_provider() {
-    let provider = toolkit_security::crypto::tls::configured_provider();
+    let provider = toolkit_security::tls::configured_provider();
     #[cfg(all(feature = "fips", target_os = "windows"))]
     assert!(
         !provider.cipher_suites.is_empty(),

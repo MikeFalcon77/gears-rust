@@ -275,7 +275,7 @@ pub fn idempotency_scope_hash(
 }
 
 fn write_field(hasher: &mut Sha256, bytes: &[u8]) {
-    hasher.update(&field_len(bytes.len()));
+    hasher.update(field_len(bytes.len()));
     hasher.update(bytes);
 }
 

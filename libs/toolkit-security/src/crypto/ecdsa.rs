@@ -1,4 +1,4 @@
-//! ECDSA P-256/SHA-256. All curve operations stay inside the selected backend.
+//! ECDSA signing and verification. All curve operations stay inside the selected backend.
 
 use std::sync::Arc;
 
@@ -17,6 +17,16 @@ const EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10
 const P256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
 const SCHEME: SignatureScheme = SignatureScheme::ECDSA_NISTP256_SHA256;
 const PAIRWISE_MESSAGE: &[u8] = b"toolkit-security ECDSA P-256 key consistency";
+
+/// Fixed curve/hash pairs supported by native ECDSA verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum EcdsaAlgorithm {
+    /// NIST P-256 with SHA-256.
+    P256Sha256,
+    /// NIST P-384 with SHA-384.
+    P384Sha384,
+}
 
 /// An ECDSA P-256 signing key owned by the configured OS backend.
 ///
@@ -177,7 +187,48 @@ pub(super) fn verify_with_provider(
     message: &[u8],
     signature: &[u8],
 ) -> Result<(), CryptoError> {
-    validate_public_key_encoding(key)?;
+    verify_signature_with_provider(
+        provider,
+        EcdsaAlgorithm::P256Sha256,
+        key,
+        message,
+        signature,
+    )
+}
+
+/// Verify an ASN.1 DER ECDSA signature with an uncompressed SEC1 public key.
+///
+/// # Errors
+/// Returns an error for malformed inputs, a signature mismatch or an unavailable
+/// backend. The curve/hash pair is exact; no alternative algorithm is tried.
+pub fn verify_ecdsa(
+    algorithm: EcdsaAlgorithm,
+    key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), CryptoError> {
+    verify_signature_with_provider(backend::provider()?, algorithm, key, message, signature)
+}
+
+pub(super) fn verify_signature_with_provider(
+    provider: &rustls::crypto::CryptoProvider,
+    algorithm: EcdsaAlgorithm,
+    key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), CryptoError> {
+    let (key_len, scheme, key_id, signature_id) = match algorithm {
+        EcdsaAlgorithm::P256Sha256 => (65, SCHEME, alg_id::ECDSA_P256, alg_id::ECDSA_SHA256),
+        EcdsaAlgorithm::P384Sha384 => (
+            97,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            alg_id::ECDSA_P384,
+            alg_id::ECDSA_SHA384,
+        ),
+    };
+    if key.len() != key_len || key.first() != Some(&4) {
+        return Err(CryptoError::InvalidKey);
+    }
     if message.len() > u32::MAX as usize {
         return Err(CryptoError::MessageTooLong);
     }
@@ -185,12 +236,12 @@ pub(super) fn verify_with_provider(
         .signature_verification_algorithms
         .mapping
         .iter()
-        .find(|(scheme, _)| *scheme == SCHEME)
+        .find(|(candidate, _)| *candidate == scheme)
         .ok_or(CryptoError::UnsupportedAlgorithm)?
         .1;
     if algorithms.iter().any(|algorithm| {
-        algorithm.public_key_alg_id() == alg_id::ECDSA_P256
-            && algorithm.signature_alg_id() == alg_id::ECDSA_SHA256
+        algorithm.public_key_alg_id() == key_id
+            && algorithm.signature_alg_id() == signature_id
             && algorithm.verify_signature(key, message, signature).is_ok()
     }) {
         Ok(())

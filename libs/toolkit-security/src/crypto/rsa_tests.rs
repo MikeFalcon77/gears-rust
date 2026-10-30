@@ -1,4 +1,6 @@
-use super::*;
+use super::{CryptoError, RsaAlgorithm, validate_components, verify_rsa_components};
+#[cfg(feature = "jwt")]
+use super::{SignatureScheme, verify_with_provider};
 
 #[test]
 fn rejects_noncanonical_or_weak_public_components() {
@@ -47,6 +49,54 @@ fn rejects_wrong_signature_size_before_dispatch() {
             &[3],
             b"message",
             &[0; 255]
+        ),
+        Err(CryptoError::InvalidSignature)
+    );
+}
+
+#[cfg(feature = "jwt")]
+#[test]
+fn provider_mapping_cannot_substitute_a_different_rsa_hash() {
+    use aws_lc_rs::{
+        rand::SystemRandom,
+        signature::{self, KeyPair},
+    };
+    use pkcs1::der::Decode;
+
+    let encoding =
+        jsonwebtoken::EncodingKey::from_rsa_pem(include_bytes!("testdata/rsa-private.pem"))
+            .unwrap();
+    let key = signature::RsaKeyPair::from_pkcs8(encoding.inner())
+        .or_else(|_| signature::RsaKeyPair::from_der(encoding.inner()))
+        .unwrap();
+    let public = pkcs1::RsaPublicKey::from_der(key.public_key().as_ref()).unwrap();
+    let message = b"exact RSA hash selection";
+    let mut signature = vec![0; key.public_modulus_len()];
+    key.sign(
+        &signature::RSA_PKCS1_SHA384,
+        &SystemRandom::new(),
+        message,
+        &mut signature,
+    )
+    .unwrap();
+    let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+    let sha384 = provider
+        .signature_verification_algorithms
+        .mapping
+        .iter()
+        .find(|(scheme, _)| *scheme == SignatureScheme::RSA_PKCS1_SHA384)
+        .unwrap()
+        .1;
+    provider.signature_verification_algorithms.mapping =
+        Box::leak(vec![(SignatureScheme::RSA_PKCS1_SHA256, sha384)].into_boxed_slice());
+    assert_eq!(
+        verify_with_provider(
+            &provider,
+            RsaAlgorithm::Pkcs1Sha256,
+            public.modulus.as_bytes(),
+            public.public_exponent.as_bytes(),
+            message,
+            &signature
         ),
         Err(CryptoError::InvalidSignature)
     );

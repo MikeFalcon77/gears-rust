@@ -187,7 +187,7 @@ pub fn validate(declaration: &DerivedUsageDeclaration) -> Result<(), DomainError
 #[must_use]
 pub fn digest_hex(declaration: &DerivedUsageDeclaration) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
-    Sha256::digest(&derived::canonical_bytes(declaration))
+    Sha256::digest(derived::canonical_bytes(declaration))
         .as_ref()
         .iter()
         .fold(String::with_capacity(64), |mut hex, b| {

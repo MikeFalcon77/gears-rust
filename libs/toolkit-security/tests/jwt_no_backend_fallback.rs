@@ -87,7 +87,7 @@ fn claims_pass_does_not_execute_jsonwebtoken_crypto() {
                 .unwrap();
         let mut signature = signer.try_sign(message.as_bytes()).unwrap();
         let token = format!("{message}.{}", URL_SAFE_NO_PAD.encode(&signature));
-        let decoded = toolkit_security::crypto::jwt::decode::<serde_json::Value>(
+        let decoded = toolkit_security::jwt::decode::<serde_json::Value>(
             &token,
             &key,
             &Validation::new(algorithm),
@@ -98,7 +98,7 @@ fn claims_pass_does_not_execute_jsonwebtoken_crypto() {
         signature[0] ^= 1;
         let invalid = format!("{message}.{}", URL_SAFE_NO_PAD.encode(signature));
         assert!(
-            toolkit_security::crypto::jwt::decode::<serde_json::Value>(
+            toolkit_security::jwt::decode::<serde_json::Value>(
                 &invalid,
                 &key,
                 &Validation::new(algorithm)

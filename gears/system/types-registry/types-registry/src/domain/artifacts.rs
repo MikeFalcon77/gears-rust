@@ -68,7 +68,7 @@ pub fn resolution_fingerprint(
         effective_traits.as_bytes(),
         effective_traits_schema.as_bytes(),
     ] {
-        hasher.update(&u64::try_from(field.len()).unwrap_or(u64::MAX).to_be_bytes());
+        hasher.update(u64::try_from(field.len()).unwrap_or(u64::MAX).to_be_bytes());
         hasher.update(field);
     }
     hasher.finalize().as_ref().to_vec()

@@ -135,7 +135,7 @@ impl RecordKey {
         let mut hash = toolkit_security::crypto::hash::Sha256::new();
         for part in [parts.connector, parts.provenance, parts.version] {
             let bytes = part.as_bytes();
-            hash.update(&(bytes.len() as u64).to_be_bytes());
+            hash.update((bytes.len() as u64).to_be_bytes());
             hash.update(bytes);
         }
         Self(hex::encode(hash.finalize()))
