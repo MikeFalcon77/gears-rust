@@ -1,6 +1,6 @@
 //! Wire-format tests for `Manifest` (ADR-0006): the grammar must be byte-for-byte unambiguous.
 
-use sha2::{Digest, Sha256};
+use toolkit_security::crypto::hash::Sha256;
 
 use super::*;
 

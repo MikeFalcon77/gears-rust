@@ -19,7 +19,7 @@
 //! The fingerprint itself never leaves the gear (no API field, header,
 //! or log line).
 
-use aws_lc_rs::hmac;
+use toolkit_security::crypto::{mac::HmacSha256, rng};
 
 use crate::domain::error::DomainError;
 
@@ -57,32 +57,36 @@ pub const BOOTSTRAP_JITTER_MAX_MS: u64 = 0;
 /// `credstore_secrets.value_fp`. Never truncated: the value is internal-only,
 /// and truncation would only add fence-collision surface.
 ///
-/// Backed by AWS-LC (`aws-lc-rs`), the same crypto library as the workspace TLS
-/// stack; under a `--features fips` build its `fips` feature unifies on, so the
-/// MAC runs through the FIPS-validated module (`RustCrypto`'s pure-Rust
-/// `sha2`/`hmac`, banned by the DE0708 FIPS-hasher lint, never could).
+/// The toolkit-security facade selects AWS-LC, corecrypto or CNG according
+/// to the build's platform/FIPS policy.
+///
+/// # Panics
+/// Panics for an invalid key or a value beyond the facade's portable MAC limit.
 #[must_use]
 pub fn compute_fp(key: &[u8], value: &[u8]) -> Vec<u8> {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, key);
-    hmac::sign(&key, value).as_ref().to_vec()
+    let key = HmacSha256::new(key).unwrap_or_else(|error| panic!("invalid fence key: {error}"));
+    key.sign(value)
+        .unwrap_or_else(|error| panic!("fence fingerprint failed: {error}"))
+        .to_vec()
 }
 
-/// Constant-time fingerprint verification (`aws_lc_rs::hmac::verify`).
+/// Constant-time fingerprint verification through the crypto facade.
 #[must_use]
 pub fn verify_fp(key: &[u8], value: &[u8], fp: &[u8]) -> bool {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, key);
-    hmac::verify(&key, value, fp).is_ok()
+    HmacSha256::new(key)
+        .and_then(|key| key.verify(value, fp))
+        .is_ok()
 }
 
 /// Generate a fresh [`FENCE_KEY_LEN`]-byte fence key from the platform CSPRNG
-/// (AWS-LC; FIPS-validated under a `--features fips` build, as above).
+/// selected by the facade's platform/FIPS policy.
 ///
 /// # Errors
 ///
 /// Returns [`DomainError::Internal`] if the system RNG fails.
 pub fn generate_key() -> Result<Vec<u8>, DomainError> {
     let mut buf = [0u8; FENCE_KEY_LEN];
-    aws_lc_rs::rand::fill(&mut buf)
+    rng::fill(&mut buf)
         .map_err(|_| DomainError::internal("fence: system RNG failed to generate a fence key"))?;
     Ok(buf.to_vec())
 }

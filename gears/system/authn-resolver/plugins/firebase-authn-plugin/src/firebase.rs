@@ -25,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode_header};
 use serde::Deserialize;
 use tokio::sync::{Mutex, RwLock};
 use toolkit_http::HttpClient;
@@ -289,7 +289,7 @@ impl FirebaseVerifier {
             .map(|c| (*c).to_owned())
             .collect();
 
-        let data = decode::<Claims>(token, key, &validation)
+        let data = toolkit_security::crypto::jwt::decode::<Claims>(token, key, &validation)
             .map_err(|e| Refusal::NotAValidToken(e.to_string()))?;
 
         let now = std::time::SystemTime::now()

@@ -27,6 +27,47 @@ fn now() -> OffsetDateTime {
 }
 
 #[test]
+fn ed25519_provider_matches_rfc8032_test_vector() {
+    // RFC 8032 §7.1, TEST 1: fixed bytes keep existing keys and signatures compatible
+    // when the crypto backend changes. https://www.rfc-editor.org/rfc/rfc8032#section-7.1
+    let seed = hex::decode(concat!(
+        "9d61b19deffd5a60ba844af492ec2cc4",
+        "4449c5697b326919703bac031cae7f60",
+    ))
+    .unwrap();
+    let public_key = hex::decode(concat!(
+        "d75a980182b10ab7d54bfed3c964073a",
+        "0ee172f3daa62325af021a68f707511a",
+    ))
+    .unwrap();
+    let signature = hex::decode(concat!(
+        "e5564300c360ac729086e2cc806e828a",
+        "84877f1eb8e5d974d873e06522490155",
+        "5fb8821590a33bacc61e39701cf9b46b",
+        "d25bf5f0595bbe24655141438e7a100b",
+    ))
+    .unwrap();
+
+    let provider = Ed25519Provider::from_seed(&seed).unwrap();
+    assert_eq!(provider.public_key(), public_key);
+    assert_eq!(provider.sign(b""), signature);
+
+    let verifier = super::provider::Ed25519Verifier::new(public_key);
+    verifier.verify(b"", &signature).unwrap();
+    assert!(verifier.verify(b"changed", &signature).is_err());
+}
+
+#[test]
+fn ed25519_provider_rejects_invalid_seed_lengths() {
+    for len in [0, 31, 33, 64] {
+        assert!(
+            Ed25519Provider::from_seed(&vec![0; len]).is_err(),
+            "a seed of {len} bytes must be rejected"
+        );
+    }
+}
+
+#[test]
 fn issued_token_verifies_and_round_trips_claims() {
     let issuer = Issuer::generate(3600).unwrap();
     let verifier = issuer.verifier();

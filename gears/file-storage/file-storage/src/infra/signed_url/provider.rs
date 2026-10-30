@@ -4,13 +4,13 @@
 //! signing primitive (and, in a FIPS deployment, the validated module behind it) is
 //! replaceable without touching the codec.
 //!
-//! `Ed25519Provider` (Ed25519 via `ring`, FIPS 186-5 approved) is the default; a FIPS
-//! deployment can implement the same traits over a validated module.
+//! `Ed25519Provider` uses the toolkit-security facade. Its existing key and
+//! token formats remain unchanged; the facade explicitly refuses Ed25519 in
+//! FIPS builds because the configured native providers do not provide it.
 
 use std::sync::Arc;
 
-use ring::rand::SystemRandom;
-use ring::signature::{self, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
+use toolkit_security::crypto::signature::{Ed25519KeyPair, verify_ed25519};
 
 use crate::domain::error::DomainError;
 
@@ -31,7 +31,7 @@ pub trait SignatureVerifier: Send + Sync {
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), DomainError>;
 }
 
-/// Default provider: Ed25519 via `ring`.
+/// Default provider: Ed25519 through the toolkit-security crypto facade.
 pub struct Ed25519Provider {
     key_pair: Ed25519KeyPair,
     public_key: Vec<u8>,
@@ -40,12 +40,10 @@ pub struct Ed25519Provider {
 impl Ed25519Provider {
     /// Generate a fresh static keypair (no rotation).
     pub fn generate() -> Result<Self, DomainError> {
-        let rng = SystemRandom::new();
-        let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
-            .map_err(|_| DomainError::token_invalid("failed to generate signing key"))?;
-        let key_pair = Ed25519KeyPair::from_pkcs8(pkcs8.as_ref())
-            .map_err(|_| DomainError::token_invalid("failed to load signing key"))?;
-        let public_key = key_pair.public_key().as_ref().to_vec();
+        let key_pair = Ed25519KeyPair::generate().map_err(|error| {
+            DomainError::token_invalid(format!("failed to generate signing key: {error}"))
+        })?;
+        let public_key = key_pair.public_key().to_vec();
         Ok(Self {
             key_pair,
             public_key,
@@ -54,10 +52,12 @@ impl Ed25519Provider {
 
     /// Construct from a 32-byte Ed25519 seed, so the keypair is stable across restarts.
     pub fn from_seed(seed: &[u8]) -> Result<Self, DomainError> {
-        let key_pair = Ed25519KeyPair::from_seed_unchecked(seed).map_err(|_| {
-            DomainError::token_invalid("invalid Ed25519 signing seed (expected 32 bytes)")
+        let key_pair = Ed25519KeyPair::from_seed(seed).map_err(|error| {
+            DomainError::token_invalid(format!(
+                "invalid Ed25519 signing seed (expected 32 bytes): {error}"
+            ))
         })?;
-        let public_key = key_pair.public_key().as_ref().to_vec();
+        let public_key = key_pair.public_key().to_vec();
         Ok(Self {
             key_pair,
             public_key,
@@ -67,7 +67,9 @@ impl Ed25519Provider {
 
 impl SignatureProvider for Ed25519Provider {
     fn sign(&self, message: &[u8]) -> Vec<u8> {
-        self.key_pair.sign(message).as_ref().to_vec()
+        self.key_pair
+            .sign(message)
+            .unwrap_or_else(|error| panic!("signed-URL signing failed: {error}"))
     }
 
     fn public_key(&self) -> Vec<u8> {
@@ -94,8 +96,8 @@ impl Ed25519Verifier {
 
 impl SignatureVerifier for Ed25519Verifier {
     fn verify(&self, message: &[u8], signature: &[u8]) -> Result<(), DomainError> {
-        UnparsedPublicKey::new(&signature::ED25519, &self.public_key)
-            .verify(message, signature)
-            .map_err(|_| DomainError::token_invalid("signature verification failed"))
+        verify_ed25519(&self.public_key, message, signature).map_err(|error| {
+            DomainError::token_invalid(format!("signature verification failed: {error}"))
+        })
     }
 }
