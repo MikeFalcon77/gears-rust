@@ -1421,6 +1421,58 @@ pub struct Answer {
     pub headers: HashMap<String, String>,
 }
 
+/// A directory that lists nobody: every history name reads `null`.
+struct NobodyDirectory;
+
+#[async_trait]
+impl crate::infra::actor_names::ActorDirectory for NobodyDirectory {
+    async fn list_users(
+        &self,
+        _ctx: &SecurityContext,
+        _tenant_id: Uuid,
+        _query: account_management_sdk::ListUsersQuery,
+    ) -> Result<
+        toolkit_odata::Page<account_management_sdk::IdpUser>,
+        toolkit::api::canonical_prelude::CanonicalError,
+    > {
+        Ok(toolkit_odata::Page::new(
+            Vec::new(),
+            toolkit_odata::PageInfo {
+                next_cursor: None,
+                prev_cursor: None,
+                limit: 200,
+            },
+        ))
+    }
+}
+
+/// A hub without Account Management: no directory is there to ask, and a lookup
+/// that reached it would be a defect.
+pub struct UnavailableDirectory;
+
+#[async_trait]
+impl crate::infra::actor_names::ActorDirectory for UnavailableDirectory {
+    fn is_available(&self) -> bool {
+        false
+    }
+
+    async fn list_users(
+        &self,
+        _ctx: &SecurityContext,
+        _tenant_id: Uuid,
+        _query: account_management_sdk::ListUsersQuery,
+    ) -> Result<
+        toolkit_odata::Page<account_management_sdk::IdpUser>,
+        toolkit::api::canonical_prelude::CanonicalError,
+    > {
+        panic!("an unavailable directory is never asked");
+    }
+}
+
+fn nobody() -> Arc<dyn crate::infra::actor_names::ActorDirectory> {
+    Arc::new(NobodyDirectory)
+}
+
 /// The gear's read surface, registered exactly as the gear registers it and
 /// answering real requests.
 ///
@@ -1452,7 +1504,25 @@ impl RestHarness {
     /// Build the surface over a fresh database, with every authorization
     /// decision allowed and a step-up assertion that passes.
     pub async fn new() -> Self {
-        Self::build(Arc::new(AllowAll), Arc::new(FixedStepUp::verified())).await
+        Self::build(
+            Arc::new(AllowAll),
+            Arc::new(FixedStepUp::verified()),
+            nobody(),
+        )
+        .await
+    }
+
+    /// The same surface with a directory the test scripts, for the history
+    /// tests that read actor names.
+    pub async fn with_directory(
+        directory: Arc<dyn crate::infra::actor_names::ActorDirectory>,
+    ) -> Self {
+        Self::build(
+            Arc::new(AllowAll),
+            Arc::new(FixedStepUp::verified()),
+            directory,
+        )
+        .await
     }
 
     /// The same surface whose declaration admin cannot reach the type
@@ -1473,7 +1543,12 @@ impl RestHarness {
     /// The same surface with every authorization decision denied, for the
     /// tests that assert the gate rather than what is behind it.
     pub async fn denying() -> Self {
-        Self::build(Arc::new(DenyAll), Arc::new(FixedStepUp::verified())).await
+        Self::build(
+            Arc::new(DenyAll),
+            Arc::new(FixedStepUp::verified()),
+            nobody(),
+        )
+        .await
     }
 
     /// The same surface with one action denied and every other allowed.
@@ -1481,6 +1556,7 @@ impl RestHarness {
         Self::build(
             Arc::new(DenyAction(action)),
             Arc::new(FixedStepUp::verified()),
+            nobody(),
         )
         .await
     }
@@ -1488,13 +1564,35 @@ impl RestHarness {
     /// The same surface for a caller that may read but may not see `pii`
     /// values unmasked.
     pub async fn without_pii_entitlement() -> Self {
-        Self::build(Arc::new(AllowButMasked), Arc::new(FixedStepUp::verified())).await
+        Self::build(
+            Arc::new(AllowButMasked),
+            Arc::new(FixedStepUp::verified()),
+            nobody(),
+        )
+        .await
+    }
+
+    /// The masked-caller surface over a scripted directory.
+    pub async fn without_pii_entitlement_with_directory(
+        directory: Arc<dyn crate::infra::actor_names::ActorDirectory>,
+    ) -> Self {
+        Self::build(
+            Arc::new(AllowButMasked),
+            Arc::new(FixedStepUp::verified()),
+            directory,
+        )
+        .await
     }
 
     /// The same surface for a caller that may read categories and
     /// declarations but not values.
     pub async fn without_value_read() -> Self {
-        Self::build(Arc::new(AllowButValues), Arc::new(FixedStepUp::verified())).await
+        Self::build(
+            Arc::new(AllowButValues),
+            Arc::new(FixedStepUp::verified()),
+            nobody(),
+        )
+        .await
     }
 
     /// The same surface where the caller's last re-authentication is too old,
@@ -1505,6 +1603,7 @@ impl RestHarness {
             Arc::new(FixedStepUp::refusing(
                 crate::domain::stepup::StepUpRefusal::Stale,
             )),
+            nobody(),
         )
         .await
     }
@@ -1512,6 +1611,7 @@ impl RestHarness {
     async fn build(
         pdp: Arc<dyn authz_resolver_sdk::AuthZResolverApi>,
         step_up: Arc<dyn crate::domain::stepup::StepUpVerifier>,
+        directory: Arc<dyn crate::infra::actor_names::ActorDirectory>,
     ) -> Self {
         Self::build_over(
             ResolutionHarness::new().await,
@@ -1519,6 +1619,7 @@ impl RestHarness {
             pdp,
             step_up,
             resolution_catalogue(),
+            directory,
         )
     }
 
@@ -1533,6 +1634,7 @@ impl RestHarness {
             pdp,
             step_up,
             admin_catalogue,
+            nobody(),
         )
     }
 
@@ -1547,6 +1649,7 @@ impl RestHarness {
             Arc::new(AllowAll),
             Arc::new(FixedStepUp::verified()),
             resolution_catalogue(),
+            nobody(),
         )
     }
 
@@ -1584,6 +1687,7 @@ impl RestHarness {
         pdp: Arc<dyn authz_resolver_sdk::AuthZResolverApi>,
         step_up: Arc<dyn crate::domain::stepup::StepUpVerifier>,
         admin_catalogue: FakeSource,
+        directory: Arc<dyn crate::infra::actor_names::ActorDirectory>,
     ) -> Self {
         let enforcer = Arc::new(authz_resolver_sdk::PolicyEnforcer::new(pdp));
         let openapi = toolkit::api::OpenApiRegistryImpl::new();
@@ -1602,12 +1706,19 @@ impl RestHarness {
             Arc::clone(&inner.db),
             Arc::clone(&enforcer),
         );
+        let names = Arc::new(
+            crate::infra::actor_names::ActorNameResolver::with_directory(
+                directory,
+                Arc::new(crate::domain::ports::NoActorNameMetrics),
+            ),
+        );
         let router = crate::api::rest::setting_routes::register_routes(
             router,
             &openapi,
             Arc::clone(&inner.resolver),
             Arc::clone(&inner.db),
             Arc::clone(&enforcer),
+            names,
         );
         let router = crate::api::rest::search_routes::register_routes(
             router,

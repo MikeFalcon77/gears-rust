@@ -968,6 +968,13 @@
             "description": "Whether `actor` carries the mask token, whether because the caller lacks\nthe unmasked-PII entitlement or because the boundary withheld it\n(`actor_withheld` tells the two apart).",
             "type": "boolean"
           },
+          "actor_name": {
+            "description": "The actor's name as the Actor Name Resolver reads it: a user's current\nname, `\"System\"` for the nil id, or `null` when the actor is masked or\nwithheld, a module, or no name could be had.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "actor_withheld": {
             "description": "Whether `actor` is withheld by the upward disclosure boundary, whatever\nthe entitlement: its tenant is not on the path from the reader tenant to\nthe record's.",
             "type": "boolean"
@@ -1022,9 +1029,11 @@
         },
         "required": [
           "id",
+          "tenant_id",
           "operation",
           "actor",
           "actor_masked",
+          "actor_name",
           "values_masked",
           "outcome",
           "request_id",
