@@ -5167,19 +5167,29 @@ dependencies = [
 name = "cf-gears-toolkit-security"
 version = "0.12.0"
 dependencies = [
+ "aws-lc-rs",
  "base64 0.22.1",
+ "cf-gears-rustls-corecrypto-provider",
+ "cf-gears-rustls-fips-shim",
  "cf-gears-toolkit-gts",
+ "hex",
+ "jsonwebtoken",
  "parking_lot",
+ "pkcs1",
  "postcard",
+ "rustls",
+ "rustls-cng-crypto",
  "secrecy",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "spki 0.7.3",
+ "subtle",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
  "trybuild",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

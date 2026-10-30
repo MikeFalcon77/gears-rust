@@ -44,6 +44,8 @@ pub mod bin_codec;
 pub mod constants;
 /// The authenticated tenant-plane caller.
 pub mod context;
+/// Application cryptographic primitives with explicit per-OS FIPS routing.
+pub mod crypto;
 /// Platform-plane identity, credentials, and the authenticator contract.
 pub mod internal_auth;
 /// TTL-bounded caching for platform-plane validation.
