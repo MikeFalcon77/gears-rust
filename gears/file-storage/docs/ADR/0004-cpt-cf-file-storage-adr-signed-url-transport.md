@@ -111,7 +111,7 @@ the dual-envelope (query + header) and the asymmetric, sidecar-cannot-mint prope
   (sidecar) — the bespoke codec-equivalent token specified under [Implementation note](#implementation-note-p2-2026-07),
   not a literal PASETO library**; all claims live inside the token.
 * **No PASETO token-library dependency (bespoke codec):** the shipped token is
-  `base64url(json(claims)).base64url(ed25519_signature)` built on the already-present `base64` and `ring`/Ed25519
+  `base64url(json(claims)).base64url(ed25519_signature)` built on the already-present `base64` and the toolkit-security Ed25519 facade
   primitives through the in-house `SignatureProvider`/`SignatureVerifier` abstraction — **no `kid` footer** (the
   sidecar instead verifies against a small ordered set of public keys, primary + previously-active, giving a
   rotation crossover window without needing to select a key by id — see the Implementation note below), and no new

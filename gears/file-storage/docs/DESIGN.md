@@ -222,7 +222,7 @@ graph LR
 | Data plane     | sidecar  | Signature + token verification, streaming upload/download, Range, SHA-256 hashing (no in-stream MIME check), `Content-Type`/`ETag` echo from token claims | axum/hyper streaming, `rusty-s3` + `quick-xml` (S3, via `reqwest`), `tokio::fs`  |
 | Application    | both     | Orchestration: presign, bind/CAS, metadata CRUD, capability discovery (control); byte pipeline (sidecar)        | Rust async services (tokio)                                                      |
 | Domain         | control  | File identity, ownership, `content_id`/`meta_version`, ETag derivation, versions                                | Rust structs + SeaORM entities                                                   |
-| Infrastructure | both     | Postgres metadata (control plane only — the sidecar has no DB connection); backend drivers (sidecar); PolicyEnforcer; platform gear YAML config (control) / env vars (sidecar backends); Ed25519 signing keys | SeaORM + SecureORM + SecureConn; `rusty-s3` + `quick-xml`; `tokio::fs`; Ed25519 via `ring` behind an in-house `SignatureProvider` abstraction (ADR-0004) |
+| Infrastructure | both     | Postgres metadata (control plane only — the sidecar has no DB connection); backend drivers (sidecar); PolicyEnforcer; platform gear YAML config (control) / env vars (sidecar backends); Ed25519 signing keys | SeaORM + SecureORM + SecureConn; `rusty-s3` + `quick-xml`; `tokio::fs`; Ed25519 via `toolkit_security::crypto::signature` behind an in-house `SignatureProvider` abstraction (ADR-0004) |
 
 ## 2. Principles & Constraints
 
@@ -1942,7 +1942,7 @@ Metadata is not replicated to the sidecar at all — it has no DB connection of 
 needs from the verified token's claims.
 
 **Signing locality & cost.** Minting a token requires the **private key**, which only the control plane holds. The
-Ed25519 sign (via `ring`, behind the in-house `SignatureProvider` abstraction) is a CPU-only operation of tens of
+Ed25519 sign (via the toolkit-security crypto facade, behind the in-house `SignatureProvider` abstraction) is a CPU-only operation of tens of
 microseconds — no DB hit, no network in the signing step. Two cases:
 
 - **SDK in-process (private key local to the caller's control instance):** signing is a direct local call, so a caller
