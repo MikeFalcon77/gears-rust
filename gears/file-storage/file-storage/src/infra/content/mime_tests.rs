@@ -70,3 +70,16 @@ fn detect_recognizes_matroska() {
     mkv.resize(300, 0);
     assert_eq!(detect(&mkv), Some("video/x-matroska"));
 }
+
+#[test]
+fn detect_recognizes_rtf_mentioning_pdf_marker() {
+    assert_eq!(
+        detect(b"{\\rtf1\\ansi The %PDF-1.7 header.\\par}"),
+        Some("application/rtf")
+    );
+}
+
+#[test]
+fn validate_rejects_rtf_with_pdf_marker_declared_as_png() {
+    assert!(validate("image/png", b"{\\rtf1\\ansi The %PDF-1.7 header.\\par}").is_err());
+}

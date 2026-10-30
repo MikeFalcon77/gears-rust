@@ -5,17 +5,23 @@ use crate::domain::policy::{EffectivePolicy, PolicyResolver};
 
 /// Detect the content type from the leading bytes; `None` if there is no recognizable
 /// signature (plain text, CSV, custom binary). `infer` >= 0.20 scans the first 1024 bytes for
-/// `%PDF`, which misclassifies text that merely mentions it (and shadows the HTML/XML/shell
-/// matchers that run after it), so a PDF is trusted only when the header is at offset 0.
+/// `%PDF`, which misclassifies text/other formats that merely contain it and shadows every
+/// matcher that runs after PDF. So when the header is not at offset 0, the `%PDF` occurrences
+/// are neutralised in a copy of the prefix and sniffing is re-run, giving the result of the
+/// remaining matchers.
 #[must_use]
 pub fn detect(bytes: &[u8]) -> Option<&'static str> {
     let mime = infer::get(bytes)?.mime_type();
     if mime != "application/pdf" || bytes.starts_with(b"%PDF") {
         return Some(mime);
     }
-    ["text/html", "text/xml", "text/x-shellscript"]
-        .into_iter()
-        .find(|&text_mime| infer::is_mime(bytes, text_mime))
+    let mut prefix = bytes[..bytes.len().min(MIME_SNIFF_PREFIX_BYTES)].to_vec();
+    for pos in 0..prefix.len().saturating_sub(3) {
+        if &prefix[pos..pos + 4] == b"%PDF" {
+            prefix[pos] = 0;
+        }
+    }
+    infer::get(&prefix).map(|t| t.mime_type())
 }
 
 /// Validate the declared mime against the detected signature. Rejected only when the bytes
