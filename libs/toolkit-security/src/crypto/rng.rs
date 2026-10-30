@@ -13,7 +13,7 @@ pub fn fill(bytes: &mut [u8]) -> Result<(), CryptoError> {
     fill_with(backend::provider()?.secure_random, bytes)
 }
 
-fn fill_with(random: &dyn SecureRandom, bytes: &mut [u8]) -> Result<(), CryptoError> {
+pub(super) fn fill_with(random: &dyn SecureRandom, bytes: &mut [u8]) -> Result<(), CryptoError> {
     for chunk in bytes.chunks_mut(u32::MAX as usize) {
         random.fill(chunk).map_err(|_| CryptoError::RandomFailed)?;
     }

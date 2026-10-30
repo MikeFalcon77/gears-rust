@@ -27,11 +27,10 @@ existing corecrypto provider and Windows uses CNG. `toolkit/fips` and
 Call `crypto::initialize()` at startup to handle unavailable providers before
 processing requests; infallible hash methods panic when backend policy cannot be met.
 
-No FIPS operation falls back to an ordinary backend. Ed25519 remains compatible
-with existing file-storage seeds and signed URLs outside FIPS; its constructors,
-signing and verification return `UnsupportedAlgorithm` under FIPS. RSA verification
-supports RS256/384/512 and PS256/384/512. The JWT adapter additionally supports
-ES256/384. HMAC/EdDSA JWT families are not currently needed and are rejected.
+ECDSA P-256/SHA-256 key generation, import, signing and verification use the selected
+backend. Its API accepts PKCS#8 DER keys with embedded uncompressed SEC1 public
+points, and emits ASN.1 DER signatures. Ed25519 remains available only in ordinary
+builds; FIPS builds reject it without fallback.
 
 HMAC FIPS keys must be at least 14 bytes. HMAC and RSA/ECDSA messages are limited to
 `u32::MAX` bytes for portable CNG dispatch; SHA-256 and RNG split larger buffers.

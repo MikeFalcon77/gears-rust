@@ -20,7 +20,9 @@ use super::{
 ///
 /// Signature verification is always required, even if the caller disabled it
 /// in `validation`. Existing RS/PS and ES256/384 consumers are supported;
-/// other algorithms fail without fallback.
+/// other algorithms fail without fallback. EC decoding keys must contain an
+/// uncompressed SEC1 public point (`0x04 || X || Y`), as produced by EC JWK
+/// components. Compressed points and SPKI-wrapped EC keys are not accepted.
 ///
 /// # Errors
 /// Returns jsonwebtoken errors for invalid signatures, keys, algorithms, token
@@ -143,6 +145,17 @@ fn verify_ecdsa(
     message: &[u8],
     signature: &[u8],
 ) -> std::result::Result<(), super::CryptoError> {
+    verify_ecdsa_with_provider(backend::provider()?, algorithm, key, message, signature)
+}
+
+// Provider injection stays internal; production callers always validate its witness.
+pub(super) fn verify_ecdsa_with_provider(
+    provider: &rustls::crypto::CryptoProvider,
+    algorithm: Algorithm,
+    key: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> std::result::Result<(), super::CryptoError> {
     use rustls::pki_types::alg_id;
     let (size, scheme, key_id, signature_id) = match algorithm {
         Algorithm::ES256 => (
@@ -178,7 +191,7 @@ fn verify_ecdsa(
         );
     }
     der[1] = u8::try_from(der.len() - 2).map_err(|_| super::CryptoError::InvalidSignature)?;
-    let algorithms = backend::provider()?
+    let algorithms = provider
         .signature_verification_algorithms
         .mapping
         .iter()
@@ -188,7 +201,6 @@ fn verify_ecdsa(
     if algorithms.iter().any(|verifier| {
         verifier.public_key_alg_id() == key_id
             && verifier.signature_alg_id() == signature_id
-            && (!cfg!(feature = "fips") || verifier.fips())
             && verifier.verify_signature(key, message, &der).is_ok()
     }) {
         Ok(())

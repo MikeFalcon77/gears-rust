@@ -8,6 +8,7 @@ use super::{CryptoError, backend};
 
 /// RSA signature algorithms supported by the platform's RSA JWKS provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RsaAlgorithm {
     /// RSASSA-PKCS1-v1_5 with SHA-256.
     Pkcs1Sha256,
@@ -52,6 +53,18 @@ pub fn verify_rsa_components(
     message: &[u8],
     signature: &[u8],
 ) -> Result<(), CryptoError> {
+    verify_with_provider(backend::provider()?, algorithm, n, e, message, signature)
+}
+
+// The public entry point validates the production provider before reaching here.
+pub(super) fn verify_with_provider(
+    provider: &rustls::crypto::CryptoProvider,
+    algorithm: RsaAlgorithm,
+    n: &[u8],
+    e: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), CryptoError> {
     validate_components(n, e)?;
     if message.len() > u32::MAX as usize {
         return Err(CryptoError::MessageTooLong);
@@ -65,7 +78,7 @@ pub fn verify_rsa_components(
     }
     .to_der()
     .map_err(|_| CryptoError::InvalidKey)?;
-    let algorithms = backend::provider()?
+    let algorithms = provider
         .signature_verification_algorithms
         .mapping
         .iter()
@@ -73,10 +86,9 @@ pub fn verify_rsa_components(
         .map(|(_, algorithms)| *algorithms)
         .ok_or(CryptoError::UnsupportedAlgorithm)?;
     if algorithms.iter().any(|verifier| {
-        (!cfg!(feature = "fips") || verifier.fips())
-            && verifier
-                .verify_signature(&public_key, message, signature)
-                .is_ok()
+        verifier
+            .verify_signature(&public_key, message, signature)
+            .is_ok()
     }) {
         Ok(())
     } else {

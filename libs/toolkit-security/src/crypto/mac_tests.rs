@@ -52,3 +52,32 @@ fn hmac_rejects_oversized_messages_before_calling_cng() {
         );
     }
 }
+
+#[test]
+fn independent_block_boundary_vectors() {
+    // Python stdlib hmac.new(b"B" * length, b"boundary", hashlib.sha256).
+    for (length, expected) in [
+        (
+            63,
+            "aad21a111f49a072c37115179a5a1b25ba6dd1dbc910ef91579a0a1956e3bf19",
+        ),
+        (
+            64,
+            "530d9d42d5a799c52ff13d9b7dd313db2604204d1f327e0385c0db94b7e29ff6",
+        ),
+        (
+            65,
+            "76c506d36076cba6b3ee21d9956fc6fbf3c9d71fe33e2868063af84c08dde198",
+        ),
+    ] {
+        assert_eq!(
+            hex::encode(
+                HmacSha256::new(&vec![b'B'; length])
+                    .unwrap()
+                    .sign(b"boundary")
+                    .unwrap()
+            ),
+            expected
+        );
+    }
+}

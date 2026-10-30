@@ -26,14 +26,16 @@ impl Sha256 {
     /// Panics if the configured implementation is unavailable.
     #[must_use]
     pub fn new() -> Self {
+        Self::with_suite(
+            backend::sha256_suite().unwrap_or_else(|error| {
+                panic!("application crypto backend is unavailable: {error}")
+            }),
+        )
+    }
+
+    pub(super) fn with_suite(suite: &'static rustls::Tls13CipherSuite) -> Self {
         Self {
-            inner: backend::sha256_suite()
-                .unwrap_or_else(|error| {
-                    panic!("application crypto backend is unavailable: {error}")
-                })
-                .common
-                .hash_provider
-                .start(),
+            inner: suite.common.hash_provider.start(),
         }
     }
 

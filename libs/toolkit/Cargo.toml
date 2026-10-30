@@ -23,7 +23,7 @@ workspace = true
 default = ["otel", "db"]
 coverage_nightly = []
 # Use the facade's per-OS policy for TLS and application primitives.
-fips = ["toolkit-security/fips"]
+fips = ["toolkit-security/fips", "dep:toolkit-http", "toolkit-http/fips"]
 
 # Database integration (toolkit-db, migrations, DbManager/DbHandle in contexts/runtime)
 db = ["dep:toolkit-db", "dep:sea-orm-migration"]
@@ -75,6 +75,7 @@ bootstrap = [
 ]
 
 [dependencies]
+toolkit-http = { workspace = true, optional = true }
 # Project-local crates
 toolkit-macros = { workspace = true }
 toolkit-canonical-errors = { workspace = true, features = ["axum", "utoipa"] }

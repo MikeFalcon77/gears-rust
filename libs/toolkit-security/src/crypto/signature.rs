@@ -7,6 +7,7 @@ use aws_lc_rs::signature::{self, KeyPair, UnparsedPublicKey};
 
 use super::CryptoError;
 
+pub use super::ecdsa::{EcdsaP256KeyPair, EcdsaP256VerifyingKey, verify_ecdsa_p256};
 pub use super::rsa::{RsaAlgorithm, verify_rsa_components};
 
 /// An owned Ed25519 signing key. Private backend types are not re-exported.
@@ -20,7 +21,7 @@ impl Ed25519KeyPair {
     /// # Errors
     /// Returns `UnsupportedAlgorithm` under FIPS or `InvalidKey` on failure.
     pub fn generate() -> Result<Self, CryptoError> {
-        ensure_supported()?;
+        ensure_ed25519_supported()?;
         signature::Ed25519KeyPair::generate()
             .map(|inner| Self { inner })
             .map_err(|_| CryptoError::InvalidKey)
@@ -31,7 +32,7 @@ impl Ed25519KeyPair {
     /// # Errors
     /// Returns `UnsupportedAlgorithm` under FIPS, or `InvalidKey` for invalid seeds.
     pub fn from_seed(seed: &[u8]) -> Result<Self, CryptoError> {
-        ensure_supported()?;
+        ensure_ed25519_supported()?;
         if seed.len() != 32 {
             return Err(CryptoError::InvalidKey);
         }
@@ -51,7 +52,7 @@ impl Ed25519KeyPair {
     /// # Errors
     /// Returns `UnsupportedAlgorithm` under FIPS or `InvalidSignature` on failure.
     pub fn sign(&self, message: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        ensure_supported()?;
+        ensure_ed25519_supported()?;
         self.inner
             .try_sign(message)
             .map(|signature| signature.as_ref().to_vec())
@@ -65,13 +66,17 @@ impl Ed25519KeyPair {
 /// Returns `UnsupportedAlgorithm` under FIPS, or `InvalidSignature` on mismatch
 /// or malformed key/signature bytes.
 pub fn verify_ed25519(key: &[u8], message: &[u8], signature: &[u8]) -> Result<(), CryptoError> {
-    ensure_supported()?;
+    ensure_ed25519_supported()?;
     UnparsedPublicKey::new(&signature::ED25519, key)
         .verify(message, signature)
         .map_err(|_| CryptoError::InvalidSignature)
 }
 
-fn ensure_supported() -> Result<(), CryptoError> {
+/// Check whether Ed25519 is permitted by the selected crypto policy.
+///
+/// # Errors
+/// Returns `UnsupportedAlgorithm` in FIPS builds.
+pub fn ensure_ed25519_supported() -> Result<(), CryptoError> {
     if cfg!(feature = "fips") {
         Err(CryptoError::UnsupportedAlgorithm)
     } else {

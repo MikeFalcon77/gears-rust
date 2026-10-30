@@ -47,7 +47,9 @@ fn validate_provider(provider: &CryptoProvider, require_fips: bool) -> Result<()
     }
 }
 
-fn find_sha256(provider: &CryptoProvider) -> Result<&'static Tls13CipherSuite, CryptoError> {
+pub(super) fn find_sha256(
+    provider: &CryptoProvider,
+) -> Result<&'static Tls13CipherSuite, CryptoError> {
     provider
         .cipher_suites
         .iter()
