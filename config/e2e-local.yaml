@@ -513,6 +513,10 @@ gears:
     database:
       server: "sqlite_users"
       file: "bss_products.db"
+      params:
+        # Writers wait for the write lock (BEGIN IMMEDIATE) instead of failing
+        # at once beside the outbox worker; see docs/toolkit_unified_system/11_database_patterns.md.
+        transaction_mode: "immediate"
 
   bss-pricing:
     # The PriceBook skeleton reserves /bss-pricing/v1 with no operations.
@@ -521,6 +525,10 @@ gears:
     database:
       server: "sqlite_users"
       file: "bss_pricing.db"
+      params:
+        # Writers wait for the write lock (BEGIN IMMEDIATE) instead of failing
+        # at once beside the outbox worker; see docs/toolkit_unified_system/11_database_patterns.md.
+        transaction_mode: "immediate"
 
   bss-approvals:
     # The approvals inbox: one list, count, card and vote over the approval units
